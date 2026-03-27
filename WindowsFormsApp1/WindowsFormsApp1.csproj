@@ -113,9 +113,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Config\AppConfig.cs" />
-    <Compile Include="Config\ConfigHelper.cs" />
-    <Compile Include="Config\DataStorage.cs" />
     <Compile Include="Data\AccountRepository.cs" />
     <Compile Include="Data\InstagramSessionRepository.cs" />
     <Compile Include="Forms\AccountDetailForm.cs">
