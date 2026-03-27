@@ -1,268 +1,77 @@
-﻿# Instagram WinForms OAuth Flow
+﻿
+# Project_Instagram (WinForms)
 
-## 1. Flow tổng
+Small Windows Forms application demonstrating an Instagram OAuth login flow, account/session storage and a simple dashboard.
 
-```
-User Login → Instagram OAuth → Redirect (code)
-→ Exchange Code → Access Token → Get User Info → Dashboard
-```
+## Requirements
 
----
+- Windows
+- .NET Framework 4.8
+- Visual Studio (recommended)
+- WebView2 runtime (if WebView2 is used for OAuth)
 
-## 2. Cấu trúc project
+## Quick start
 
-* Forms
+1. Restore NuGet packages in Visual Studio.
+2. Configure `config.json` with your Instagram app values (see Config section).
+3. Build and run the solution.
 
-  * Login: xử lý login
-  * Dashboard: container chính
-* Views (UserControl)
+Note: the app stores a local SQLite file at `Application.StartupPath\\SQLite\\data.db`.
 
-  * HomeView
-  * AccountView
-* Services
+## Important: SQLite provider initialization
 
-  * InstagramAuthService: xử lý API
-* Models
+If you get an exception saying "You need to call SQLitePCL.raw.SetProvider()...", initialize the SQLitePCL provider before any database access. Two options:
 
-  * AuthResult
-  * InstagramUser
-* Config
+- Recommended: add a bundle package and call Batteries.Init():
+  1. Install NuGet package `SQLitePCLRaw.bundle_e_sqlite3` (or `SQLitePCLRaw.bundle_winsqlite3`).
+  2. In `Program.Main()` before `SqliteHelper.EnsureDatabase()` add:
+     `SQLitePCL.Batteries.Init();`
 
-  * AppConfig (clientId, redirectUri)
+- Alternative (manual): call `SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());` early in startup.
 
----
+This project expects the provider to be initialized before `SqliteHelper.CreateTables()` opens the database.
 
-## 3. Các bước chính
+## Configuration
 
-### Step 1: Login
+- `config.json`: put Instagram `client_id`, `client_secret` (avoid committing secrets), and `redirect_uri`.
 
-* Mở WebView2
-* Điều hướng đến URL OAuth
-* User đăng nhập
-
----
-
-### Step 2: Lấy code
-
-* Instagram redirect về:
+Example keys:
 
 ```
-https://localhost/?code=XXXX
-```
-
-* Parse:
-
-```
-?code=...
-```
-
----
-
-### Step 3: Đổi token
-
-POST:
-
-```
-https://api.instagram.com/oauth/access_token
-```
-
-Body:
-
-```
-client_id
-client_secret
-grant_type=authorization_code
-redirect_uri
-code
-```
-
----
-
-### Step 4: Lấy user
-
-GET:
-
-```
-https://graph.instagram.com/me
-```
-
-Params:
-
-```
-fields=id,username,account_type
-access_token=...
-```
-
----
-
-## 4. Output
-
-```json
 {
-  "id": "...",
-  "username": "...",
-  "account_type": "BUSINESS"
+  "clientId": "YOUR_CLIENT_ID",
+  "clientSecret": "YOUR_CLIENT_SECRET",
+  "redirectUri": "https://localhost/"
 }
 ```
 
----
+## Project structure (high level)
 
-## 5. UI Flow (Dashboard)
+- `Forms/` - WinForms UI: `AccountsCenterForm`, `DashBoard`, `AccountDetailForm`, etc.
+- `Views/` - UserControls used by the dashboard.
+- `Services/` - API and business logic (Instagram auth, posts, account services).
+- `Data/` - Repositories for SQLite storage (account/session persistence).
+- `Models/` - Domain models (AccountInfo, InstagramSession, AuthResult).
+- `Helpers/SqliteHelper.cs` - helper that creates `data.db` and the tables; uses `Microsoft.Data.Sqlite`.
 
-```
-Dashboard (Form)
-   └── panelMain
-         ├── HomeView
-         ├── AccountView
-```
+## OAuth flow (summary)
 
-### Cách hoạt động
+1. Open WebView2 and navigate to Instagram OAuth URL.
+2. User signs in and Instagram redirects to `redirect_uri` with `?code=...`.
+3. Exchange `code` for an access token via Instagram API.
+4. Load basic user info and save account/session locally.
 
-* Dashboard giữ dữ liệu user
-* Menu click → load View
-* View nhận user qua constructor
+## Troubleshooting
 
----
+- "You need to call SQLitePCL.raw.SetProvider()...": see "Important: SQLite provider initialization" above.
+- "Invalid redirect_uri": confirm `redirect_uri` in Instagram app settings matches `config.json`.
+- If WebView2 does not load, install the WebView2 runtime.
 
-## 6. Truyền dữ liệu giữa các màn
+## Contributing
 
-### Dashboard
+Open a pull request for bug fixes or improvements. Keep secrets out of the repository.
 
-```
-private InstagramUser _user;
-```
+## License
 
-### Load View
+This repository follows the license in the project root (if any). If none, assume permissive use only with attribution.
 
-```
-LoadView(new HomeView(_user));
-LoadView(new AccountView(_user));
-```
-
-### View nhận dữ liệu
-
-```
-public HomeView(InstagramUser user)
-```
-
----
-
-## 7. Lưu account (khuyến nghị)
-
-Sau khi login thành công:
-
-```json
-{
-  "id": "...",
-  "username": "...",
-  "accessToken": "..."
-}
-```
-
-### Mục đích
-
-* Không cần login lại
-* Dùng multi account
-* Dùng automation
-
----
-
-## 8. Bảo mật
-
-### Không nên
-
-* Hard-code `clientSecret`
-* Lưu `clientSecret` trong WinForms
-
-### Nên
-
-```
-WinForms → Backend → Instagram API
-```
-
----
-
-## 9. Backend (Production)
-
-### API cần có
-
-```
-POST /api/auth/exchange
-```
-
-### Flow
-
-```
-WinForms → gửi code → Backend
-Backend → gọi Instagram
-Backend → trả access_token
-```
-
----
-
-## 10. Các lỗi thường gặp
-
-| Lỗi                         | Nguyên nhân            |
-| --------------------------- | ---------------------- |
-| Invalid redirect_uri        | Sai URL config         |
-| Insufficient Developer Role | chưa add tester        |
-| Page isn't available        | sai app type           |
-| Không lấy được code         | redirectUri không khớp |
-| Null user                   | chưa parse JSON        |
-
----
-
-## 11. Mở rộng (MMO / Automation)
-
-Có thể phát triển thêm:
-
-### Account
-
-* Multi account
-* Switch account
-* Lưu JSON / DB
-
-### Automation
-
-* Auto login bằng cookie
-* Comment / inbox
-* Đăng bài
-
-### Hạ tầng
-
-* Proxy từng account
-* Anti-detect browser
-* Session management
-
----
-
-## 12. Best Practice
-
-* Tách Service khỏi UI
-* Không gọi API trực tiếp trong Form
-* Dùng config JSON
-* Dùng UserControl thay vì nhiều Form
-* Cache View để tránh reload
-
----
-
-## 13. Roadmap đề xuất
-
-```
-1. Login + lấy user
-2. Lưu account
-3. Multi account UI
-4. Dashboard hoàn chỉnh
-5. Backend (bảo mật)
-6. Automation
-```
-
----
-
-## 14. Ghi chú
-
-* OAuth chỉ dùng để login ban đầu
-* Tool MMO thường dùng cookie/session thay vì OAuth
-* WebView2 chỉ là bước đầu
-
----
