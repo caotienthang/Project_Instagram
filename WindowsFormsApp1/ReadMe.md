@@ -1,77 +1,207 @@
 ﻿
-# Project_Instagram (WinForms)
 
-Small Windows Forms application demonstrating an Instagram OAuth login flow, account/session storage and a simple dashboard.
+# Project\_Instagram (WinForms)
 
-## Requirements
+Ứng dụng **Windows Forms (.NET Framework 4.8)** quản lý tài khoản Instagram thông qua AccountsCenter API, hỗ trợ đăng bài, quản lý xác thực 2 yếu tố (2FA/TOTP), lưu trữ session cục bộ bằng SQLite.
 
-- Windows
-- .NET Framework 4.8
-- Visual Studio (recommended)
-- WebView2 runtime (if WebView2 is used for OAuth)
+---
 
-## Quick start
+## Yêu cầu
 
-1. Restore NuGet packages in Visual Studio.
-2. Configure `config.json` with your Instagram app values (see Config section).
-3. Build and run the solution.
+| Thành phần | Phiên bản |
+|---|---|
+| Windows | 10 trở lên |
+| .NET Framework | 4.8 |
+| Visual Studio | 2019 trở lên (khuyến nghị) |
+| Microsoft Edge WebView2 Runtime | Bất kỳ (dùng cho luồng đăng nhập) |
 
-Note: the app stores a local SQLite file at `Application.StartupPath\\SQLite\\data.db`.
+---
 
-## Important: SQLite provider initialization
+## Chạy nhanh
 
-If you get an exception saying "You need to call SQLitePCL.raw.SetProvider()...", initialize the SQLitePCL provider before any database access. Two options:
+1. Clone repository về máy.
+2. Mở `WindowsFormsApp1.sln` bằng Visual Studio.
+3. Restore NuGet packages (chuột phải Solution → **Restore NuGet Packages**).
+4. Build và chạy (`F5`).
 
-- Recommended: add a bundle package and call Batteries.Init():
-  1. Install NuGet package `SQLitePCLRaw.bundle_e_sqlite3` (or `SQLitePCLRaw.bundle_winsqlite3`).
-  2. In `Program.Main()` before `SqliteHelper.EnsureDatabase()` add:
-     `SQLitePCL.Batteries.Init();`
+> File SQLite được tạo tự động tại `<thư mục chạy>\SQLite\data.db` khi khởi động lần đầu.
 
-- Alternative (manual): call `SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());` early in startup.
+---
 
-This project expects the provider to be initialized before `SqliteHelper.CreateTables()` opens the database.
+## Tính năng chính
 
-## Configuration
+### 1. Quản lý tài khoản (AccountsCenterForm)
 
-- `config.json`: put Instagram `client_id`, `client_secret` (avoid committing secrets), and `redirect_uri`.
+- Mở WebView2 điều hướng đến `https://www.instagram.com/accounts/login/`.
+- Sau khi đăng nhập, tự động redirect sang `https://accountscenter.instagram.com/`.
+- `AccountsCenterService` trích xuất từ WebView2:
+  - Token `fb_dtsg`, `lsd` (từ JS runtime).
+  - Cookie phiên làm việc.
+  - Thông tin tài khoản (username, full name, email, phone, avatar, birthday, account ID).
+- Lưu `AccountInfo` và `InstagramSession` vào SQLite.
+- Hỗ trợ thêm mới hoặc cập nhật tài khoản đã tồn tại.
 
-Example keys:
+### 2. Dashboard (DashBoard)
+
+- Hiển thị danh sách tài khoản dạng DataGridView với avatar, thông tin cơ bản, trạng thái.
+- Checkbox chọn nhiều tài khoản đồng thời.
+- Tìm kiếm/lọc tài khoản theo tên.
+- Cột **Get Cookie** lấy cookie mới cho tài khoản đã chọn.
+- Load avatar không đồng bộ qua `AvatarService`.
+
+### 3. Đăng bài (InstagramPostService)
+
+- Upload ảnh đơn hoặc album (sidecar) lên Instagram.
+- Tự động phân nhánh: 1 ảnh → `configure_content_publish`, nhiều ảnh → `configure_sidecar`.
+- Upload ảnh binary trực tiếp qua `rupload_igphoto`.
+- Nhận `caption` tùy chỉnh.
+
+### 4. Quản lý 2FA/TOTP (TwoFactorService)
+
+Toàn bộ giao tiếp qua `https://accountscenter.instagram.com/api/graphql/`.
+
+| Method | Mô tả | doc\_id |
+|---|---|---|
+| `GetStatusAsync` | Lấy trạng thái 2FA, danh sách thiết bị TOTP | `25960508096941189` |
+| `GenerateTotpKeyAsync` | Tạo TOTP key mới (trả về QR code URI, key text) | `9837172312995248` |
+| `ConfirmTotpAsync` | Xác nhận mã 6 chữ số để bật 2FA | `29164158613231327` |
+| `DisableTotpAsync` | Gỡ thiết bị TOTP theo `method_id` | `29616201561327421` |
+| `GenerateTotpCode` | Tạo mã TOTP hiện tại từ Base32 secret (RFC 6238) | — |
+| `PreloadConfirmDialogAsync` | Pre-flight query UI strings trước khi xác nhận | `26277751381877270` |
+
+**Luồng thêm thiết bị 2FA:**
 
 ```
-{
-  "clientId": "YOUR_CLIENT_ID",
-  "clientSecret": "YOUR_CLIENT_SECRET",
-  "redirectUri": "https://localhost/"
-}
+[Nhập tên thiết bị (nếu đã có thiết bị)]
+        ↓
+GenerateTotpKeyAsync()        — lấy QR code + key text
+        ↓
+PreloadConfirmDialogAsync()   — pre-flight query (bỏ qua response)
+        ↓
+TwoFactorAddDeviceDialog      — hiện QR, tải ảnh QR từ Facebook CDN
+        ↓
+User quét QR → nhập mã 6 số
+        ↓
+ConfirmTotpAsync()            — bật 2FA
 ```
 
-## Project structure (high level)
+**Luồng gỡ thiết bị:**
 
-- `Forms/` - WinForms UI: `AccountsCenterForm`, `DashBoard`, `AccountDetailForm`, etc.
-- `Views/` - UserControls used by the dashboard.
-- `Services/` - API and business logic (Instagram auth, posts, account services).
-- `Data/` - Repositories for SQLite storage (account/session persistence).
-- `Models/` - Domain models (AccountInfo, InstagramSession, AuthResult).
-- `Helpers/SqliteHelper.cs` - helper that creates `data.db` and the tables; uses `Microsoft.Data.Sqlite`.
+```
+[Chọn thiết bị cần gỡ — nút chỉ active khi có ≥ 2 thiết bị]
+        ↓
+DisableTotpAsync(seedId)      — gỡ thiết bị theo method_id
+        ↓
+Refresh danh sách local
+```
 
-## OAuth flow (summary)
+### 5. Hỗ trợ Proxy
 
-1. Open WebView2 and navigate to Instagram OAuth URL.
-2. User signs in and Instagram redirects to `redirect_uri` with `?code=...`.
-3. Exchange `code` for an access token via Instagram API.
-4. Load basic user info and save account/session locally.
+`HttpClientFactory` hỗ trợ proxy toàn cục cho tất cả HTTP request:
+
+```csharp
+// Thiết lập proxy cho toàn bộ service
+HttpClientFactory.SetProxy("http://user:pass@host:port");
+
+// Hoặc qua từng service
+var svc = new AccountsCenterService(coreWebView2);
+svc.SetProxy("http://127.0.0.1:8888");
+
+var postSvc = new InstagramPostService();
+postSvc.SetProxy("http://127.0.0.1:8888");
+```
+
+Format hỗ trợ:
+- `http://host:port`
+- `http://username:password@host:port`
+
+Nếu không gọi `SetProxy`, tất cả request đi thẳng (không qua proxy).
+
+---
+
+## Cấu trúc dự án
+
+```
+WindowsFormsApp1/
+├── Forms/
+│   ├── DashBoard.cs              # Form chính, danh sách tài khoản
+│   └── AccountsCenterForm.cs     # WebView2 đăng nhập & lấy session
+├── Views/
+│   ├── TwoFactorManagerDialog.cs # Quản lý thiết bị 2FA
+│   ├── TwoFactorAddDeviceDialog.cs # Thêm thiết bị TOTP (QR + xác nhận)
+│   ├── PostPanel.cs              # Panel đăng bài
+│   └── ImageSourceDialog.cs      # Chọn nguồn ảnh
+├── Services/
+│   ├── AccountsCenterService.cs  # Lấy session từ WebView2
+│   ├── InstagramPostService.cs   # Upload & đăng bài
+│   ├── TwoFactorService.cs       # Toàn bộ logic 2FA/TOTP
+│   ├── AvatarService.cs          # Tải avatar async
+│   └── HttpClientFactory.cs     # HttpClient với proxy support
+├── Data/
+│   ├── AccountRepository.cs      # CRUD bảng Accounts
+│   └── InstagramSessionRepository.cs # CRUD bảng Sessions
+├── Models/
+│   ├── AccountInfo.cs            # Thông tin tài khoản
+│   └── InstagramSession.cs       # Cookie + fb_dtsg + lsd
+└── Helpers/
+    └── SqliteHelper.cs           # Tạo DB & migrate schema
+```
+
+---
+
+## Cơ sở dữ liệu SQLite
+
+File: `<thư mục chạy>\SQLite\data.db`
+
+| Bảng | Mô tả |
+|---|---|
+| `Accounts` | Thông tin tài khoản Instagram |
+| `InstagramSessions` | Cookie, fb\_dtsg, lsd theo từng account |
+
+Schema được tạo tự động khi khởi động. Migration `ADD COLUMN` chạy an toàn (bỏ qua nếu cột đã tồn tại).
+
+---
+
+## NuGet packages chính
+
+| Package | Mục đích |
+|---|---|
+| `Microsoft.Data.Sqlite` | SQLite ORM-free |
+| `SQLitePCLRaw.bundle_e_sqlite3` | SQLite native provider |
+| `Newtonsoft.Json` | JSON serialize/deserialize |
+| `Microsoft.Web.WebView2` | Nhúng trình duyệt Chromium |
+
+---
+
+## Ghi chú quan trọng — SQLite provider
+
+Nếu gặp lỗi: *"You need to call SQLitePCL.raw.SetProvider()..."*
+
+Thêm vào `Program.Main()` **trước** `SqliteHelper.EnsureDatabase()`:
+
+```csharp
+SQLitePCL.Batteries.Init();
+SqliteHelper.EnsureDatabase();
+```
+
+---
 
 ## Troubleshooting
 
-- "You need to call SQLitePCL.raw.SetProvider()...": see "Important: SQLite provider initialization" above.
-- "Invalid redirect_uri": confirm `redirect_uri` in Instagram app settings matches `config.json`.
-- If WebView2 does not load, install the WebView2 runtime.
+| Triệu chứng | Nguyên nhân | Giải pháp |
+|---|---|---|
+| Lỗi provider SQLite | Chưa khởi tạo | Gọi `SQLitePCL.Batteries.Init()` |
+| WebView2 không load | Chưa cài runtime | Cài [Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) |
+| 2FA: "This code isn't right" | Mã TOTP hết hạn | Nhập lại mã mới trong vòng 30 giây |
+| Upload ảnh thất bại | Session hết hạn | Dùng **Get Cookie** để lấy session mới |
+- `Invalid redirect_uri`: kiểm tra `redirect_uri` trong Instagram app và `config.json`.
+- WebView2 không load: cài WebView2 runtime.
 
 ## Contributing
 
-Open a pull request for bug fixes or improvements. Keep secrets out of the repository.
+Mở PR cho bugfix hoặc tính năng. Không commit secrets.
 
 ## License
 
-This repository follows the license in the project root (if any). If none, assume permissive use only with attribution.
+Theo file license ở root (nếu có).
 

@@ -1,207 +1,494 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Security.Principal;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using WindowsFormsApp1.Views;
 using WindowsFormsApp1.Data;
-using WindowsFormsApp1.Helpers;
 using WindowsFormsApp1.Models;
+using WindowsFormsApp1.Services;
 
 namespace WindowsFormsApp1.Forms
 {
     public partial class DashBoard : Form
     {
         private List<AccountInfo> _accounts;
+        private readonly AvatarService      _avatarService;
+        private readonly InstagramPostService _postService;
+        private readonly TwoFactorService   _twoFactorService;
+        private bool _allSelected  = false;
+        private bool _searchActive = false;
+
+        // ── Status badge colors (new dark palette) ──────────────────
+        private static readonly Color ClrReady   = Color.FromArgb(46,  204, 113);
+        private static readonly Color ClrWorking = Color.FromArgb(241, 196,  15);
+        private static readonly Color ClrSuccess = Color.FromArgb(39,  174,  96);
+        private static readonly Color ClrError   = Color.FromArgb(231,  76,  60);
+        private static readonly Color ClrDefault = Color.FromArgb(149, 165, 166);
+
         public DashBoard()
         {
             InitializeComponent();
+            _avatarService    = new AvatarService();
+            _postService      = new InstagramPostService();
+            _twoFactorService = new TwoFactorService();
+            SetupSearchPlaceholder();
             SetupGrid();
             LoadData();
         }
 
-        // ================= SETUP GRID =================
+        // ═══════════════════════════════════════════════════════════
+        // GRID SETUP
+        // ═══════════════════════════════════════════════════════════
         private void SetupGrid()
         {
             grid.Columns.Clear();
 
-            // checkbox
-            grid.Columns.Add(new DataGridViewCheckBoxColumn()
+            // Checkbox
+            grid.Columns.Add(new DataGridViewCheckBoxColumn
             {
-                Width = 30
+                Name = "Select", HeaderText = "", Width = 36, Resizable = DataGridViewTriState.False
             });
 
-            // ID (ẩn)
-            grid.Columns.Add("Id", "Id");
-            grid.Columns["Id"].Visible = false;
+            // Hidden ID
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Id", Visible = false
+            });
 
-            grid.Columns.Add("Username", "Username");
-            grid.Columns.Add("FullName", "Full Name");
-            grid.Columns.Add("Email", "Email");
-            grid.Columns.Add("Phone", "Phone");
+            // Text columns
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Username", HeaderText = "Username",  MinimumWidth = 120 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "FullName", HeaderText = "Full Name", MinimumWidth = 120 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Email",    HeaderText = "Email",     MinimumWidth = 160 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Phone",    HeaderText = "Phone",     MinimumWidth = 110 });
 
-            // Avatar (image)
-            var avatarCol = new DataGridViewImageColumn();
-            avatarCol.Name = "Avatar";
-            avatarCol.HeaderText = "Avatar";
-            avatarCol.ImageLayout = DataGridViewImageCellLayout.Zoom;
-            avatarCol.Width = 60;
-            grid.Columns.Add(avatarCol);
+            // Avatar image
+            grid.Columns.Add(new DataGridViewImageColumn
+            {
+                Name = "Avatar", HeaderText = "Avatar",
+                ImageLayout = DataGridViewImageCellLayout.Zoom,
+                Width = 64, Resizable = DataGridViewTriState.False
+            });
 
-            grid.Columns.Add("Birthday", "Birthday");
-            grid.Columns.Add("Status", "Status");
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Birthday", HeaderText = "Birthday", MinimumWidth = 90 });
+
+            // Status / Log
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Status", HeaderText = "Status / Log", MinimumWidth = 160
+            });
+
+            // Get-Cookie action button
+            grid.Columns.Add(new DataGridViewButtonColumn
+            {
+                Name = "GetCookie", HeaderText = "Action",
+                Text = "🍪 Get Cookie", UseColumnTextForButtonValue = true,
+                Width = 110, Resizable = DataGridViewTriState.False
+            });
 
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            grid.RowTemplate.Height = 50;
-            grid.AllowUserToAddRows = false;
+            grid.RowTemplate.Height  = 54;
+            grid.AllowUserToAddRows  = false;
         }
 
-        // ================= LOAD DATA =================
+        // ═══════════════════════════════════════════════════════════
+        // LOAD DATA
+        // ═══════════════════════════════════════════════════════════
         private void LoadData()
         {
             _accounts = AccountRepository.GetAll();
-
             grid.Rows.Clear();
 
             foreach (var acc in _accounts)
             {
-                Image avatarImg = LoadAvatar(acc.Avatar);
-
                 int rowIndex = grid.Rows.Add(
-                    false,
-                    acc.Id,
-                    acc.Username,
-                    acc.FullName,
-                    acc.Email,
-                    acc.Phone,
-                    avatarImg,
+                    false, acc.Id,
+                    acc.Username, acc.FullName, acc.Email, acc.Phone,
+                    LoadAvatar(acc.Avatar),
                     acc.Birthday,
-                    acc.Status
+                    "Ready"
                 );
-
-                SetStatusColor(rowIndex, acc.Status);
+                ApplyStatusStyle(grid.Rows[rowIndex], "ready");
             }
+
+            UpdateSelectedCount();
         }
 
-        // ================= LOAD AVATAR =================
         private Image LoadAvatar(string path)
         {
             try
             {
-                if (string.IsNullOrEmpty(path) || !File.Exists(path))
-                    return null;
-
-                // ✅ tránh lock file
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
                 using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
-                {
                     return Image.FromStream(fs);
+            }
+            catch { return null; }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // STATUS STYLING
+        // ═══════════════════════════════════════════════════════════
+        private void ApplyStatusStyle(DataGridViewRow row, string statusType)
+        {
+            Color bg;
+            switch ((statusType ?? "").ToLower())
+            {
+                case "ready":    bg = ClrReady;   break;
+                case "working":  bg = ClrWorking; break;
+                case "success":  bg = ClrSuccess; break;
+                case "error":    bg = ClrError;   break;
+                default:         bg = ClrDefault; break;
+            }
+            row.Cells["Status"].Style.BackColor          = bg;
+            row.Cells["Status"].Style.ForeColor          = Color.White;
+            row.Cells["Status"].Style.SelectionBackColor = bg;
+            row.Cells["Status"].Style.SelectionForeColor = Color.White;
+            row.Cells["Status"].Style.Font               = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            row.Cells["Status"].Style.Alignment          = DataGridViewContentAlignment.MiddleCenter;
+        }
+
+        private void UpdateAccountStatus(int accountId, string statusText, string statusType = "working")
+        {
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.Cells["Id"].Value != null &&
+                    Convert.ToInt32(row.Cells["Id"].Value) == accountId)
+                {
+                    row.Cells["Status"].Value = statusText;
+                    ApplyStatusStyle(row, statusType);
+                    grid.Refresh();
+                    Application.DoEvents();
+                    break;
                 }
             }
-            catch
-            {
-                return null;
-            }
         }
 
-        // ================= COLOR STATUS =================
-        private void SetStatusColor(int rowIndex, string status)
+        // ═══════════════════════════════════════════════════════════
+        // SELECTED COUNT
+        // ═══════════════════════════════════════════════════════════
+        private void UpdateSelectedCount()
         {
-            var row = grid.Rows[rowIndex];
-
-            switch ((status ?? "").ToLower())
-            {
-                case "live":
-                    row.Cells["Status"].Style.BackColor = Color.LightGreen;
-                    break;
-
-                case "running":
-                    row.Cells["Status"].Style.BackColor = Color.LightYellow;
-                    break;
-
-                case "error":
-                    row.Cells["Status"].Style.BackColor = Color.IndianRed;
-                    row.Cells["Status"].Style.ForeColor = Color.White;
-                    break;
-
-                default:
-                    row.Cells["Status"].Style.BackColor = Color.LightGray;
-                    break;
-            }
+            int count = grid.Rows.Cast<DataGridViewRow>()
+                .Count(r => r.Cells["Select"].Value != null && (bool)r.Cells["Select"].Value == true);
+            lblSelectedCount.Text = $"{count} selected";
         }
 
-        private void grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        // ═══════════════════════════════════════════════════════════
+        // SEARCH  (placeholder behaviour for .NET 4.8)
+        // ═══════════════════════════════════════════════════════════
+        private void SetupSearchPlaceholder()
+        {
+            txtSearch.GotFocus += (s, e) =>
+            {
+                if (!_searchActive)
+                {
+                    txtSearch.Text      = "";
+                    txtSearch.ForeColor = Color.FromArgb(200, 205, 230);
+                    _searchActive       = true;
+                }
+            };
+            txtSearch.LostFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(txtSearch.Text))
+                {
+                    _searchActive       = false;
+                    txtSearch.Text      = "🔍  Search accounts...";
+                    txtSearch.ForeColor = Color.FromArgb(105, 115, 155);
+                }
+            };
+        }
+
+        private void txtSearch_TextChanged(object sender, EventArgs e)
+        {
+            if (!_searchActive) return;
+            string q = txtSearch.Text.ToLower();
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                string user  = (row.Cells["Username"].Value ?? "").ToString().ToLower();
+                string name  = (row.Cells["FullName"].Value ?? "").ToString().ToLower();
+                string email = (row.Cells["Email"].Value    ?? "").ToString().ToLower();
+                row.Visible  = string.IsNullOrEmpty(q) || user.Contains(q) || name.Contains(q) || email.Contains(q);
+            }
+            UpdateSelectedCount();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // GRID EVENTS
+        // ═══════════════════════════════════════════════════════════
+        private void grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0) return;
 
-            int id = Convert.ToInt32(grid.Rows[e.RowIndex].Cells["Id"].Value);
+            // Checkbox column → update count
+            if (e.ColumnIndex == grid.Columns["Select"].Index)
+            {
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                UpdateSelectedCount();
+                return;
+            }
 
-            var account = _accounts.FirstOrDefault(x => x.Id == id);
+            // Get-Cookie button column
+            if (e.ColumnIndex == grid.Columns["GetCookie"].Index)
+            {
+                int accountId = Convert.ToInt32(grid.Rows[e.RowIndex].Cells["Id"].Value);
+                var account   = _accounts.FirstOrDefault(x => x.Id == accountId);
+                if (account == null) return;
 
-            if (account == null) return;
+                AppendLog($"🍪 Getting cookie for: {account.Username}");
 
-            var form = new AccountDetailForm(account);
-            form.Show();
+                using (var form = new AccountsCenterForm(account))
+                    form.ShowDialog();
+
+                LoadData();
+                AppendLog($"✅ Cookie updated: {account.Username}");
+            }
         }
-        private void btnGetCookie_Click(object sender, EventArgs e)
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — SELECT ALL / DESELECT ALL
+        // ═══════════════════════════════════════════════════════════
+        private void btnSelectAll_Click(object sender, EventArgs e)
+        {
+            _allSelected = !_allSelected;
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.Visible)
+                    row.Cells["Select"].Value = _allSelected;
+            }
+            btnSelectAll.Text = _allSelected ? "☑  Deselect All" : "☐  Select All";
+            UpdateSelectedCount();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — CHECK 2FA (selected accounts)
+        // ═══════════════════════════════════════════════════════════
+        private async void btn2FA_Click(object sender, EventArgs e)
+        {
+            var selected = GetCheckedAccounts();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Please select at least 1 account.", "No Selection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            foreach (var account in selected)
+            {
+                if (string.IsNullOrEmpty(account.AccountId))
+                {
+                    AppendLog($"[{account.Username}] ❌ No AccountId — please use \"Get Cookie\" first.");
+                    UpdateAccountStatus(account.Id, "No AccountId", "error");
+                    continue;
+                }
+
+                var session = InstagramSessionRepository.GetByAccountId(account.Id);
+                if (session == null)
+                {
+                    AppendLog($"[{account.Username}] ❌ No session — please use \"Get Cookie\" first.");
+                    UpdateAccountStatus(account.Id, "No session", "error");
+                    continue;
+                }
+
+                UpdateAccountStatus(account.Id, "Checking 2FA…", "working");
+                AppendLog($"[{account.Username}] 🔐 Checking 2FA status…");
+
+                try
+                {
+                    var status = await _twoFactorService.GetStatusAsync(account.AccountId, session);
+
+                    if (!string.IsNullOrEmpty(status.Error))
+                    {
+                        AppendLog($"[{account.Username}] ❌ {status.Error}");
+                        UpdateAccountStatus(account.Id, "2FA error", "error");
+                        continue;
+                    }
+
+                    AppendLog($"[{account.Username}] {(status.IsTotpEnabled ? "🔐 ENABLED" : "🔓 DISABLED")} — " +
+                              $"Devices: {status.Seeds.Count}  SMS: {(status.IsSmsEnabled ? "ON" : "OFF")}");
+
+                    UpdateAccountStatus(account.Id,
+                        status.IsTotpEnabled ? "2FA: ON ✓" : "2FA: OFF",
+                        status.IsTotpEnabled ? "success"  : "working");
+
+                    using (var dlg = new TwoFactorManagerDialog(account, status, _twoFactorService, session))
+                    {
+                        dlg.OnLog += msg => AppendLog(msg);
+                        dlg.ShowDialog(this);
+
+                        if (dlg.NeedsRefresh)
+                            UpdateAccountStatus(account.Id,
+                                dlg.FinalTotpEnabled ? "2FA: ON ✓" : "2FA: OFF",
+                                dlg.FinalTotpEnabled ? "success"  : "working");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"[{account.Username}] ❌ 2FA error: {ex.Message}");
+                    UpdateAccountStatus(account.Id, "2FA error", "error");
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — CHANGE AVATAR
+        // ═══════════════════════════════════════════════════════════
+        private async void btnChangeAvatar_Click(object sender, EventArgs e)
         {
             try
             {
-                // 1. Kiểm tra chọn dòng
-                if (grid.SelectedRows.Count == 0)
+                var selectedAccounts = GetCheckedAccounts();
+                if (selectedAccounts.Count == 0)
                 {
-                    MessageBox.Show("Vui lòng chọn 1 account!");
+                    MessageBox.Show("Please select at least 1 account.", "No Selection",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
-                var row = grid.SelectedRows[0];
-
-                int accountId = Convert.ToInt32(row.Cells["Id"].Value);
-
-                // 2. Tìm account trong list
-                var account = _accounts.FirstOrDefault(x => x.Id == accountId);
-
-                if (account == null)
+                ImageSourceDialog.SourceType sourceType;
+                using (var dialog = new ImageSourceDialog())
                 {
-                    MessageBox.Show("Không tìm thấy account!");
-                    return;
+                    if (dialog.ShowDialog() != DialogResult.OK) return;
+                    sourceType = dialog.SelectedSource;
+                }
+                if (sourceType == ImageSourceDialog.SourceType.None) return;
+
+                var imagePaths = new List<string>();
+
+                if (sourceType == ImageSourceDialog.SourceType.Folder)
+                {
+                    using (var fd = new FolderBrowserDialog
+                        { Description = "Select folder containing avatar images", ShowNewFolderButton = false })
+                    {
+                        if (fd.ShowDialog() != DialogResult.OK) return;
+                        imagePaths = Directory.GetFiles(fd.SelectedPath)
+                            .Where(f => IsImageFile(f)).ToList();
+
+                        if (imagePaths.Count == 0)
+                        {
+                            MessageBox.Show("No image files found in the selected folder.", "Empty Folder",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        AppendLog($"📁 Folder: {fd.SelectedPath}  ({imagePaths.Count} images)");
+                    }
+                }
+                else
+                {
+                    using (var ofd = new OpenFileDialog { Filter = "Image Files|*.jpg;*.jpeg;*.png", Title = "Select Avatar Image" })
+                    {
+                        if (ofd.ShowDialog() != DialogResult.OK) return;
+                        imagePaths.Add(ofd.FileName);
+                        AppendLog($"📄 File: {Path.GetFileName(ofd.FileName)}");
+                    }
                 }
 
-                logBox.AppendText($"Đang lấy cookie cho: {account.Username}\n");
-
-                // 3. Mở form lấy cookie (truyền account vào)
-                using (var form = new AccountsCenterForm(account))
+                var rng = new Random();
+                foreach (var account in selectedAccounts)
                 {
-                    var result = form.ShowDialog();
+                    UpdateAccountStatus(account.Id, "Changing avatar…", "working");
+                    var session = InstagramSessionRepository.GetByAccountId(account.Id);
+                    if (session == null)
+                    {
+                        AppendLog($"[{account.Username}] ❌ No session found");
+                        UpdateAccountStatus(account.Id, "No session", "error");
+                        continue;
+                    }
+                    string img = imagePaths[rng.Next(imagePaths.Count)];
+                    AppendLog($"[{account.Username}] 📷 → {Path.GetFileName(img)}");
+                    var result = await _avatarService.UploadAvatar(img, session);
+                    if (result.success)
+                    {
+                        account.Avatar = result.localPath;
+                        AccountRepository.UpdateAvatar(account.Id, result.localPath);
+                        AppendLog($"[{account.Username}] ✅ Avatar changed");
+                        UpdateAccountStatus(account.Id, "Avatar updated ✓", "success");
+                    }
+                    else
+                    {
+                        AppendLog($"[{account.Username}] ❌ {result.message}");
+                        UpdateAccountStatus(account.Id, "Failed", "error");
+                    }
+                    await Task.Delay(rng.Next(1000, 2000));
                 }
 
-                // 4. Reload lại grid sau khi update session
                 LoadData();
-
-                logBox.AppendText($"Đã cập nhật cookie cho: {account.Username}\n");
             }
             catch (Exception ex)
             {
-                logBox.AppendText("Lỗi: " + ex.Message + "\n");
+                AppendLog($"❌ Error: {ex.Message}");
             }
         }
 
-        private void btnAdd_Click(object sender, EventArgs e)
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — POST
+        // ═══════════════════════════════════════════════════════════
+        private void btnPost_Click(object sender, EventArgs e)
         {
-            using (var form = new AccountsCenterForm())
+            var selectedAccounts = GetCheckedAccounts();
+            if (selectedAccounts.Count == 0)
             {
-                var result = form.ShowDialog();
-                LoadData();
+                MessageBox.Show("Please select at least 1 account.", "No Selection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
+
+            postContainer.Controls.Clear();
+            var postPanel = new PostPanel(selectedAccounts);
+
+            postPanel.OnLog          += msg  => AppendLog(msg);
+            postPanel.OnStatusUpdate += (id, text, type) => UpdateAccountStatus(id, text, type);
+            postPanel.OnClose        += () =>
+            {
+                postContainer.Visible = false;
+                postContainer.Controls.Clear();
+                logPanel.Visible = true;
+            };
+
+            postContainer.Controls.Add(postPanel);
+            logPanel.Visible      = false;
+            postContainer.Visible = true;
+            postContainer.BringToFront();
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — REFRESH
+        // ═══════════════════════════════════════════════════════════
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             LoadData();
+            AppendLog("🔄 Data refreshed.");
         }
+
+        // ═══════════════════════════════════════════════════════════
+        // HELPERS
+        // ═══════════════════════════════════════════════════════════
+        private List<AccountInfo> GetCheckedAccounts()
+        {
+            var list = new List<AccountInfo>();
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.Cells["Select"].Value != null && (bool)row.Cells["Select"].Value == true)
+                {
+                    int id = Convert.ToInt32(row.Cells["Id"].Value);
+                    var acc = _accounts.FirstOrDefault(x => x.Id == id);
+                    if (acc != null) list.Add(acc);
+                }
+            }
+            return list;
+        }
+
+        private void AppendLog(string message)
+        {
+            string line = $"[{DateTime.Now:HH:mm:ss}]  {message}\n";
+            logBox.AppendText(line);
+            logBox.ScrollToCaret();
+        }
+
+        private static bool IsImageFile(string path) =>
+            path.EndsWith(".jpg",  StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".png",  StringComparison.OrdinalIgnoreCase);
     }
 }

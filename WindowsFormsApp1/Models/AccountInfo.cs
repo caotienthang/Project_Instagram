@@ -9,6 +9,7 @@ namespace WindowsFormsApp1.Models
     public class AccountInfo
     {
         public int Id { get; set; }
+        public string AccountId { get; set; }  // Instagram user ID từ fx_accounts_management
 
         public string FullName { get; set; }
         public string Username { get; set; }

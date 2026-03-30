@@ -41,8 +41,8 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)";
+                INSERT INTO Accounts (AccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
+                VALUES (@AccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)";
 
                 BindParams(cmd, acc, includeId: false);
 
@@ -60,6 +60,7 @@ namespace WindowsFormsApp1.Data
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
                 UPDATE Accounts SET
+                    AccountId=@AccountId,
                     Username=@Username,
                     FullName=@FullName,
                     Email=@Email,
@@ -84,9 +85,10 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (Id, Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@Id, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)
+                INSERT INTO Accounts (Id, AccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
+                VALUES (@Id, @AccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)
                 ON CONFLICT(Id) DO UPDATE SET
+                    AccountId=excluded.AccountId,
                     Username=excluded.Username,
                     FullName=excluded.FullName,
                     Email=excluded.Email,
@@ -145,14 +147,15 @@ namespace WindowsFormsApp1.Data
         {
             return new AccountInfo
             {
-                Id = Convert.ToInt32(reader["Id"]),
-                Username = reader["Username"]?.ToString(),
-                FullName = reader["FullName"]?.ToString(),
-                Email = reader["Email"]?.ToString(),
-                Phone = reader["Phone"]?.ToString(),
-                Avatar = reader["Avatar"]?.ToString(),
-                Birthday = reader["Birthday"]?.ToString(),
-                Status = reader["Status"]?.ToString()
+                Id        = Convert.ToInt32(reader["Id"]),
+                AccountId = reader["AccountId"]?.ToString(),
+                Username  = reader["Username"]?.ToString(),
+                FullName  = reader["FullName"]?.ToString(),
+                Email     = reader["Email"]?.ToString(),
+                Phone     = reader["Phone"]?.ToString(),
+                Avatar    = reader["Avatar"]?.ToString(),
+                Birthday  = reader["Birthday"]?.ToString(),
+                Status    = reader["Status"]?.ToString()
             };
         }
 
@@ -161,13 +164,14 @@ namespace WindowsFormsApp1.Data
             if (includeId)
                 cmd.Parameters.AddWithValue("@Id", acc.Id);
 
-            cmd.Parameters.AddWithValue("@Username", acc.Username ?? "");
-            cmd.Parameters.AddWithValue("@FullName", acc.FullName ?? "");
-            cmd.Parameters.AddWithValue("@Email", acc.Email ?? "");
-            cmd.Parameters.AddWithValue("@Phone", acc.Phone ?? "");
-            cmd.Parameters.AddWithValue("@Avatar", acc.Avatar ?? "");
-            cmd.Parameters.AddWithValue("@Birthday", acc.Birthday ?? "");
-            cmd.Parameters.AddWithValue("@Status", acc.Status ?? "");
+            cmd.Parameters.AddWithValue("@AccountId", acc.AccountId ?? "");
+            cmd.Parameters.AddWithValue("@Username",  acc.Username  ?? "");
+            cmd.Parameters.AddWithValue("@FullName",  acc.FullName  ?? "");
+            cmd.Parameters.AddWithValue("@Email",     acc.Email     ?? "");
+            cmd.Parameters.AddWithValue("@Phone",     acc.Phone     ?? "");
+            cmd.Parameters.AddWithValue("@Avatar",    acc.Avatar    ?? "");
+            cmd.Parameters.AddWithValue("@Birthday",  acc.Birthday  ?? "");
+            cmd.Parameters.AddWithValue("@Status",    acc.Status    ?? "");
         }
     }
 }

@@ -25,6 +25,12 @@ namespace WindowsFormsApp1.Services
             _webView = webView;
         }
 
+        // Forward proxy setting to central factory
+        public void SetProxy(string proxyUrl)
+        {
+            HttpClientFactory.SetProxy(proxyUrl);
+        }
+
         public async Task<(AccountInfo account, InstagramSession session)> GetAccountAndSession()
         {
             // ===== 1. TOKEN =====
@@ -55,7 +61,7 @@ namespace WindowsFormsApp1.Services
             string cookieHeader = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"));
 
             // ===== 3. CALL API =====
-            var client = new HttpClient(new HttpClientHandler { UseCookies = false });
+            var client = HttpClientFactory.Create(useCookies: false);
             client.DefaultRequestHeaders.Add("cookie", cookieHeader);
             client.DefaultRequestHeaders.Add("x-fb-lsd", lsd);
             client.DefaultRequestHeaders.Add("user-agent", "Mozilla/5.0"); 
@@ -102,7 +108,6 @@ namespace WindowsFormsApp1.Services
             }
             else
             {
-                // Nếu không có, lấy linked_identities_to_pci[0] nếu có
                 var linkedIdentities = data["data"]?["fx_identity_management"]?["identities_and_central_identities"]?["linked_identities_to_pci"];
                 if (linkedIdentities != null && linkedIdentities.Any())
                 {
@@ -110,6 +115,12 @@ namespace WindowsFormsApp1.Services
                 }
             }
             if (identity == null) throw new Exception("Parse lỗi");
+
+            // ── Account ID từ fx_accounts_management.accounts[0].id ──
+            string accountId = null;
+            var fxAccounts = data["data"]?["fx_accounts_management"]?["accounts"];
+            if (fxAccounts != null && fxAccounts.Any())
+                accountId = fxAccounts[0]?["id"]?.ToString();
 
             var nodes = data["data"]?["fxcal_settings"]?["node"]?["personal_info_section"]?["nodes"];
 
@@ -164,7 +175,7 @@ namespace WindowsFormsApp1.Services
                     // Chỉ tải nếu file chưa tồn tại
                     if (!File.Exists(avatarLocalPath))
                     {
-                        using (var http = new HttpClient())
+                        using (var http = HttpClientFactory.Create())
                         {
                             var bytes = await http.GetByteArrayAsync(avatarUrl);
                             File.WriteAllBytes(avatarLocalPath, bytes); // sync, .NET Framework compatible
@@ -179,13 +190,14 @@ namespace WindowsFormsApp1.Services
 
             return new AccountInfo
             {
-                FullName = identity["full_name"]?.ToString(),
-                Username = identity["username"]?.ToString(),
-                Email = string.Join(";", emails),
-                Phone = string.Join(";", phones),
-                Birthday = birthday,
-                Avatar = avatarLocalPath, // chỉ lưu đường dẫn local
-                Status = "Active"
+                AccountId = accountId,
+                FullName  = identity["full_name"]?.ToString(),
+                Username  = identity["username"]?.ToString(),
+                Email     = string.Join(";", emails),
+                Phone     = string.Join(";", phones),
+                Birthday  = birthday,
+                Avatar    = avatarLocalPath,
+                Status    = "Active"
             };
         }
     }

@@ -13,6 +13,11 @@ namespace WindowsFormsApp1.Services
 {
     public class InstagramPostService
     {
+        // Forward proxy setting to central factory
+        public void SetProxy(string proxyUrl)
+        {
+            HttpClientFactory.SetProxy(proxyUrl);
+        }
         // ===== PUBLIC API =====
         public async Task<string> PostMedia(List<string> paths, string caption, InstagramSession session)
         {
@@ -47,7 +52,7 @@ namespace WindowsFormsApp1.Services
         {
             try
             {
-                var client = new HttpClient(new HttpClientHandler { UseCookies = false });
+                var client = HttpClientFactory.Create(useCookies: false);
                 string csrf = GetCookieValue(session.Cookie, "csrftoken");
 
                 client.DefaultRequestHeaders.Add("cookie", session.Cookie);
@@ -122,7 +127,6 @@ namespace WindowsFormsApp1.Services
             try
             {
                 var client = CreateHttp(session);
-
                 var childrenMetadata = uploadIds.Select(id => new Dictionary<string, string>
                 {
                     { "upload_id", id }
@@ -144,13 +148,14 @@ namespace WindowsFormsApp1.Services
                     { "source_type", "library" },
                     { "jazoest", "22707" }
                 };
-
+                var jsonPayload = JsonConvert.SerializeObject(payload, Formatting.Indented);
                 var content = new FormUrlEncodedContent(new Dictionary<string, string>
                 {
                     { "signed_body", "SIGNATURE." + JsonConvert.SerializeObject(payload) }
                 });
 
                 var res = await client.PostAsync("https://www.instagram.com/api/v1/media/configure_sidecar/", content);
+                var responseText = await res.Content.ReadAsStringAsync();
                 return await HandleResponse(res);
             }
             catch (Exception ex)
@@ -162,8 +167,7 @@ namespace WindowsFormsApp1.Services
         // ===== HELPERS =====
         private HttpClient CreateHttp(InstagramSession session)
         {
-            var handler = new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false };
-            var client = new HttpClient(handler);
+            var client = HttpClientFactory.Create(useCookies: false);
             string csrf = GetCookieValue(session.Cookie, "csrftoken");
 
             client.DefaultRequestHeaders.Add("cookie", session.Cookie);

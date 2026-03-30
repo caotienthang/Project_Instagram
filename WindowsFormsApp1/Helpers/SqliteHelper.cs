@@ -41,6 +41,7 @@ namespace WindowsFormsApp1.Helpers
             cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS Accounts (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                AccountId TEXT,
                 FullName TEXT,
                 Username TEXT NOT NULL UNIQUE,
                 Email TEXT,
@@ -50,6 +51,14 @@ namespace WindowsFormsApp1.Helpers
                 Status TEXT
             );";
             cmd.ExecuteNonQuery();
+
+            // Migration: add AccountId column to existing databases
+            try
+            {
+                cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN AccountId TEXT;";
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* column already exists — ignore */ }
 
             // 2. AuthResults
             cmd.CommandText = @"
