@@ -163,20 +163,18 @@ namespace WindowsFormsApp1.Services
                 // ===== 3. AES KEY + IV =====
                 var random = new SecureRandom();
 
-                byte[] aesKey = new byte[16]; // AES-128
+                byte[] aesKey = new byte[32]; // AES-256
                 byte[] iv = new byte[12];     // GCM IV
 
                 random.NextBytes(aesKey);
                 random.NextBytes(iv);
 
                 // ===== 4. AAD =====
-                // AAD is empty
-                byte[] aad = new byte[0];
+                // AAD uses timestamp string!
+                byte[] aad = Encoding.UTF8.GetBytes(timestamp.ToString());
 
                 // ===== 5. PLAINTEXT =====
-                // passwordBytes is timestamp:password
-                string combinedPassword = $"{timestamp}:{encrypt_password}";
-                byte[] plaintext = Encoding.UTF8.GetBytes(combinedPassword);
+                byte[] plaintext = Encoding.UTF8.GetBytes(encrypt_password);
 
                 // ===== 6. AES-GCM =====
                 byte[] encrypted = AesGcmEncrypt(aesKey, iv, plaintext, aad);
@@ -185,10 +183,10 @@ namespace WindowsFormsApp1.Services
                 byte[] ciphertext = encrypted.Take(encrypted.Length - 16).ToArray();
                 byte[] tag = encrypted.Skip(encrypted.Length - 16).ToArray();
 
-                // ===== 7. RSA OAEP SHA256 =====
-                byte[] encryptedKey = RsaEncryptOAEP(rsaPublicKey, aesKey);
+                // ===== 7. RSA PKCS1_v1_5 =====
+                byte[] encryptedKey = RsaPkcs1Encrypt(rsaPublicKey, aesKey);
 
-                // ===== 7. BUILD PAYLOAD =====
+                // ===== 8. BUILD PAYLOAD =====
                 using (var ms = new MemoryStream())
                 using (var bw = new BinaryWriter(ms))
                 {
@@ -198,8 +196,8 @@ namespace WindowsFormsApp1.Services
 
                     // length of encryptedKey - MUST BE LITTLE-ENDIAN for Instagram App!
                     ushort len = (ushort)encryptedKey.Length; // 256 for RSA-2048
-                    bw.Write((byte)(len & 0xFF)); // Low byte (0x00)
-                    bw.Write((byte)(len >> 8));   // High byte (0x01)
+                    bw.Write((byte)(len & 0xFF)); // Low byte
+                    bw.Write((byte)(len >> 8));   // High byte
 
                     bw.Write(encryptedKey);
 
@@ -243,13 +241,10 @@ namespace WindowsFormsApp1.Services
             }
         }
 
-        private byte[] RsaEncryptOAEP(AsymmetricKeyParameter publicKey, byte[] data)
+        private byte[] RsaPkcs1Encrypt(AsymmetricKeyParameter publicKey, byte[] data)
         {
-            var engine = new Org.BouncyCastle.Crypto.Encodings.OaepEncoding(
-                new Org.BouncyCastle.Crypto.Engines.RsaEngine(),
-                new Org.BouncyCastle.Crypto.Digests.Sha256Digest(),   // hash
-                new Org.BouncyCastle.Crypto.Digests.Sha256Digest(),   // MGF1 = SHA256
-                null
+            var engine = new Org.BouncyCastle.Crypto.Encodings.Pkcs1Encoding(
+                new Org.BouncyCastle.Crypto.Engines.RsaEngine()
             );
 
             engine.Init(true, publicKey);
