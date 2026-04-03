@@ -41,8 +41,8 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (AccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@AccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)";
+                INSERT INTO Accounts (FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
+                VALUES (@FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)";
 
                 BindParams(cmd, acc, includeId: false);
 
@@ -60,7 +60,8 @@ namespace WindowsFormsApp1.Data
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
                 UPDATE Accounts SET
-                    AccountId=@AccountId,
+                    FbAccountId=@FbAccountId,
+                    PhoneAccountId=@PhoneAccountId,
                     Username=@Username,
                     FullName=@FullName,
                     Email=@Email,
@@ -85,10 +86,11 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (Id, AccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@Id, @AccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)
+                INSERT INTO Accounts (Id, FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
+                VALUES (@Id, @FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)
                 ON CONFLICT(Id) DO UPDATE SET
-                    AccountId=excluded.AccountId,
+                    FbAccountId=excluded.FbAccountId,
+                    PhoneAccountId=excluded.PhoneAccountId,
                     Username=excluded.Username,
                     FullName=excluded.FullName,
                     Email=excluded.Email,
@@ -125,6 +127,32 @@ namespace WindowsFormsApp1.Data
             return null;
         }
 
+        // ================= GET BY FB ACCOUNT ID OR PHONE ACCOUNT ID =================
+        public static AccountInfo GetByAccountIds(string fbAccountId, string phoneAccountId)
+        {
+            using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
+            {
+                conn.Open();
+
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT * FROM Accounts 
+                    WHERE (FbAccountId=@FbAccountId AND FbAccountId IS NOT NULL AND FbAccountId != '') 
+                       OR (PhoneAccountId=@PhoneAccountId AND PhoneAccountId IS NOT NULL AND PhoneAccountId != '')
+                    LIMIT 1";
+                cmd.Parameters.AddWithValue("@FbAccountId", fbAccountId ?? "");
+                cmd.Parameters.AddWithValue("@PhoneAccountId", phoneAccountId ?? "");
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                        return Map(reader);
+                }
+            }
+
+            return null;
+        }
+
         // ================= UPDATE AVATAR =================
         public static void UpdateAvatar(int accountId, string avatarPath)
         {
@@ -142,20 +170,39 @@ namespace WindowsFormsApp1.Data
             }
         }
 
+        // ================= UPDATE PASSWORD =================
+        public static void UpdatePassword(int accountId, string newPassword)
+        {
+            using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
+            {
+                conn.Open();
+
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = "UPDATE Accounts SET Password=@Password WHERE Id=@Id";
+
+                cmd.Parameters.AddWithValue("@Id", accountId);
+                cmd.Parameters.AddWithValue("@Password", newPassword ?? "");
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         // ================= HELPER =================
         private static AccountInfo Map(SqliteDataReader reader)
         {
             return new AccountInfo
             {
-                Id        = Convert.ToInt32(reader["Id"]),
-                AccountId = reader["AccountId"]?.ToString(),
-                Username  = reader["Username"]?.ToString(),
-                FullName  = reader["FullName"]?.ToString(),
-                Email     = reader["Email"]?.ToString(),
-                Phone     = reader["Phone"]?.ToString(),
-                Avatar    = reader["Avatar"]?.ToString(),
-                Birthday  = reader["Birthday"]?.ToString(),
-                Status    = reader["Status"]?.ToString()
+                Id             = Convert.ToInt32(reader["Id"]),
+                FbAccountId    = reader["FbAccountId"]?.ToString(),
+                PhoneAccountId = reader["PhoneAccountId"]?.ToString(),
+                Username       = reader["Username"]?.ToString(),
+                FullName       = reader["FullName"]?.ToString(),
+                Email          = reader["Email"]?.ToString(),
+                Phone          = reader["Phone"]?.ToString(),
+                Avatar         = reader["Avatar"]?.ToString(),
+                Birthday       = reader["Birthday"]?.ToString(),
+                Status         = reader["Status"]?.ToString(),
+                Password       = reader["Password"]?.ToString()
             };
         }
 
@@ -164,14 +211,15 @@ namespace WindowsFormsApp1.Data
             if (includeId)
                 cmd.Parameters.AddWithValue("@Id", acc.Id);
 
-            cmd.Parameters.AddWithValue("@AccountId", acc.AccountId ?? "");
-            cmd.Parameters.AddWithValue("@Username",  acc.Username  ?? "");
-            cmd.Parameters.AddWithValue("@FullName",  acc.FullName  ?? "");
-            cmd.Parameters.AddWithValue("@Email",     acc.Email     ?? "");
-            cmd.Parameters.AddWithValue("@Phone",     acc.Phone     ?? "");
-            cmd.Parameters.AddWithValue("@Avatar",    acc.Avatar    ?? "");
-            cmd.Parameters.AddWithValue("@Birthday",  acc.Birthday  ?? "");
-            cmd.Parameters.AddWithValue("@Status",    acc.Status    ?? "");
+            cmd.Parameters.AddWithValue("@FbAccountId",    acc.FbAccountId    ?? "");
+            cmd.Parameters.AddWithValue("@PhoneAccountId", acc.PhoneAccountId ?? "");
+            cmd.Parameters.AddWithValue("@Username",       acc.Username       ?? "");
+            cmd.Parameters.AddWithValue("@FullName",       acc.FullName       ?? "");
+            cmd.Parameters.AddWithValue("@Email",          acc.Email          ?? "");
+            cmd.Parameters.AddWithValue("@Phone",          acc.Phone          ?? "");
+            cmd.Parameters.AddWithValue("@Avatar",         acc.Avatar         ?? "");
+            cmd.Parameters.AddWithValue("@Birthday",       acc.Birthday       ?? "");
+            cmd.Parameters.AddWithValue("@Status",         acc.Status         ?? "");
         }
     }
 }

@@ -1,0 +1,204 @@
+=== INSTAGRAM PASSWORD ENCRYPTION: AES-GCM + RSA (UPDATED) ===
+
+## 📋 Overview
+
+Instagram sử dụng hybrid encryption scheme cho password:
+1. **AES-256-GCM** - Symmetric encryption cho password (BouncyCastle implementation)
+2. **RSA-2048-PKCS1** - Asymmetric encryption cho AES key
+
+## 🔐 Correct Encryption Flow
+
+### Step 1: Parse RSA Public Key
+```
+Input: Base64-encoded PEM public key
+Output: RSACryptoServiceProvider with parsed parameters
+```
+
+### Step 2: Generate Random Values
+```
+AES Key: 32 bytes (256 bits) - Random
+IV (Nonce): 12 bytes (96 bits) - Random for GCM
+```
+
+### Step 3: AES-256-GCM Encryption (BouncyCastle)
+```
+Library: Org.BouncyCastle.Crypto.Modes.GcmBlockCipher
+Mode: GCM (Galois/Counter Mode)
+Tag Size: 128 bits (16 bytes)
+
+Input: password (UTF-8 bytes)
+Output: 
+  - ciphertext (same length as password)
+  - tag (16 bytes authentication tag)
+```
+
+### Step 4: RSA Encryption of AES Key
+```
+Algorithm: RSA with PKCS1 padding
+Input: 32-byte AES key
+Output: 256-byte encrypted key (for RSA-2048)
+```
+
+### Step 5: Build Final Payload **WITH LENGTH FIELD**
+```
+✅ CORRECT Payload Structure:
+┌─────────┬─────────┬─────────┬────────────┬─────────────┬─────────┬────────────┐
+│version  │ key_id  │  IV(12) │ len_key(2) │ enc_key(256)│ tag(16) │ciphertext(n)│
+└─────────┴─────────┴─────────┴────────────┴─────────────┴─────────┴────────────┘
+  1 byte    1 byte    12 bytes   2 bytes      256 bytes    16 bytes   variable
+
+version    = 0x01 (fixed)
+key_id     = 227 (0xE3) - Instagram's current key ID
+IV         = Random 12-byte nonce for GCM
+len_key    = Length of encrypted_key in BIG-ENDIAN (usually 0x0100 = 256)
+enc_key    = RSA(AES_KEY) using PKCS1 padding
+tag        = GCM authentication tag from BouncyCastle
+ciphertext = AES-GCM(password)
+
+Total bytes: 1 + 1 + 12 + 2 + 256 + 16 + len(password) = 288 + len(password)
+```
+
+**❗ IMPORTANT**: The 2-byte length field was missing in previous implementation!
+
+### Step 6: Format Final String
+```
+Format: #PWD_INSTAGRAM:4:{timestamp}:{base64_payload}
+
+Example:
+#PWD_INSTAGRAM:4:1734567890:AecAAAEA...
+
+Where:
+- 4 = Version number
+- 1734567890 = Unix timestamp
+- AecAAAEA... = Base64(payload from Step 5)
+```
+
+## 🛠️ BouncyCastle Implementation
+
+### AES-GCM Encryption (Simplified)
+```csharp
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Parameters;
+
+var cipher = new GcmBlockCipher(new AesEngine());
+var parameters = new AeadParameters(
+    new KeyParameter(aesKey), 
+    128,    // Tag size in bits
+    nonce   // 12-byte IV
+);
+
+cipher.Init(true, parameters); // true = encrypt
+
+var outputSize = cipher.GetOutputSize(plaintext.Length);
+var output = new byte[outputSize];
+
+var len = cipher.ProcessBytes(plaintext, 0, plaintext.Length, output, 0);
+cipher.DoFinal(output, len);
+
+// BouncyCastle appends tag to ciphertext
+// output = [ciphertext][tag]
+ciphertext = output[0..plaintext.Length];
+tag = output[plaintext.Length..outputSize];
+```
+
+## 📊 Example Encryption
+
+### Input
+```
+Password: "MyPassword123"
+Timestamp: 1734567890
+```
+
+### Intermediate Values
+```
+AES Key: [random 32 bytes]
+IV: [random 12 bytes]
+Password bytes: 4D 79 50 61 73 73 77 6F 72 64 31 32 33 (13 bytes)
+
+After GCM encryption (BouncyCastle):
+Ciphertext: [13 bytes, encrypted]
+Tag: [16 bytes, authentication]
+
+After RSA:
+Encrypted AES Key: [256 bytes]
+Encrypted Key Length: 0x01 0x00 (256 in big-endian)
+```
+
+### Final Output
+```
+Payload structure:
+01 E3 [IV:12] 01 00 [RSA(Key):256] [Tag:16] [CT:13]
+      ^------^  ^--^
+      version   length (big-endian)
+
+Byte positions:
+[0] = 0x01              (version)
+[1] = 0xE3              (key_id = 227)
+[2-13] = IV             (12 bytes)
+[14-15] = 0x01 0x00     (length = 256)
+[16-271] = encrypted key (256 bytes)
+[272-287] = tag         (16 bytes)
+[288-300] = ciphertext  (13 bytes)
+
+Total: 301 bytes
+
+Base64: AecAAAEA... (≈402 characters)
+
+Final: #PWD_INSTAGRAM:4:1734567890:AecAAAEA...
+```
+
+## 🔒 Security Notes
+
+1. **Random Values**: 
+   - AES key and IV must be cryptographically random
+   - Uses RNGCryptoServiceProvider for entropy
+
+2. **Key Size**:
+   - AES-256: 32-byte key (256 bits)
+   - RSA-2048: 256-byte encrypted output
+
+3. **Authentication**:
+   - GCM provides integrity and authenticity via GHASH
+   - Tag verification prevents tampering
+
+4. **Length Field**:
+   - 2 bytes in BIG-ENDIAN format
+   - Allows variable-length RSA keys (future-proof)
+   - Usually 0x01 0x00 (256 decimal)
+
+5. **BouncyCastle Benefits**:
+   - Proper GCM implementation (CTR + GHASH)
+   - Cross-platform compatibility
+   - Well-tested cryptographic library
+
+## 📚 Dependencies
+
+```xml
+<package id="BouncyCastle.NetCore" version="2.4.0" />
+```
+
+## ⚠️ Implementation Notes
+
+- BouncyCastle's GcmBlockCipher handles both encryption and authentication
+- Tag is appended to ciphertext in output (need to split)
+- Length field must be written as big-endian (high byte first)
+- Compatible with Instagram's server-side decryption
+
+## ✅ Validation Checklist
+
+To verify correct implementation:
+- [x] Password encrypts without errors
+- [x] Format matches: #PWD_INSTAGRAM:4:{ts}:{base64}
+- [x] Payload structure: [1][227][IV:12][len:2][key:256][tag:16][ct]
+- [x] Length field is big-endian (0x01 0x00 for 256)
+- [x] Uses BouncyCastle AES-GCM
+- [x] Login succeeds on Instagram servers
+
+## 🔧 Code Reference
+
+See `InstagramPhoneLoginService.cs`:
+- `EncryptPassword()` - Main encryption method
+- `AesGcmEncrypt()` - BouncyCastle GCM implementation
+- Payload building with 2-byte length field
+

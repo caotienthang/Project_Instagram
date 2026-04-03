@@ -276,10 +276,10 @@ namespace WindowsFormsApp1.Forms
 
             foreach (var account in selected)
             {
-                if (string.IsNullOrEmpty(account.AccountId))
+                if (string.IsNullOrEmpty(account.FbAccountId))
                 {
-                    AppendLog($"[{account.Username}] ❌ No AccountId — please use \"Get Cookie\" first.");
-                    UpdateAccountStatus(account.Id, "No AccountId", "error");
+                    AppendLog($"[{account.Username}] ❌ No FbAccountId — please use \"Get Cookie\" first.");
+                    UpdateAccountStatus(account.Id, "No FbAccountId", "error");
                     continue;
                 }
 
@@ -296,7 +296,7 @@ namespace WindowsFormsApp1.Forms
 
                 try
                 {
-                    var status = await _twoFactorService.GetStatusAsync(account.AccountId, session);
+                    var status = await _twoFactorService.GetStatusAsync(account.FbAccountId, session);
 
                     if (!string.IsNullOrEmpty(status.Error))
                     {
@@ -459,6 +459,110 @@ namespace WindowsFormsApp1.Forms
         {
             LoadData();
             AppendLog("🔄 Data refreshed.");
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — SETTINGS
+        // ═══════════════════════════════════════════════════════════
+        private void btnSettings_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new SettingsDialog())
+            {
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    AppendLog("⚙️ Settings updated successfully.");
+                    MessageBox.Show(
+                        "✅ Cài đặt đã được cập nhật!\n\nCác thay đổi sẽ có hiệu lực cho các thao tác tiếp theo.",
+                        "Settings Updated",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — CHANGE PASSWORD
+        // ═══════════════════════════════════════════════════════════
+        private void btnChangePassword_Click(object sender, EventArgs e)
+        {
+            var selected = GetCheckedAccounts();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Please select 1 account to change password.", "No Selection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (selected.Count > 1)
+            {
+                MessageBox.Show("Please select only 1 account at a time to change password.", "Multiple Selection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var account = selected[0];
+
+            using (var methodDlg = new PasswordMethodDialog())
+            {
+                if (methodDlg.ShowDialog(this) != DialogResult.OK) return;
+
+                if (methodDlg.SelectedMethod == PasswordMethodDialog.ChangeMethod.Computer)
+                {
+                    var session = InstagramSessionRepository.GetByAccountId(account.Id);
+                    if (session == null)
+                    {
+                        MessageBox.Show(
+                            $"Tài khoản @{account.Username} chưa có session.\nVui lòng dùng \"Get Cookie\" trước.",
+                            "Không có Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    AppendLog($"[{account.Username}] 🔑 Mở trang đổi mật khẩu qua WebView2...");
+                    using (var form = new ChangePasswordWebForm(account, session))
+                        form.ShowDialog(this);
+                    AppendLog($"[{account.Username}] ✅ Hoàn tất đổi mật khẩu (session đã xóa).");
+                }
+                else if (methodDlg.SelectedMethod == PasswordMethodDialog.ChangeMethod.Phone)
+                {
+                    using (var dlg = new ChangePasswordDialog(account))
+                    {
+                        if (dlg.ShowDialog(this) == DialogResult.OK)
+                            AppendLog($"[{account.Username}] 🔑 Password updated successfully.");
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // BUTTON — ADD ACCOUNT
+        // ═══════════════════════════════════════════════════════════
+        private void btnAddAccount_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new AddAccountDialog())
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                if (dlg.SelectedMethod == AddAccountDialog.LoginMethod.Computer)
+                {
+                    AppendLog("🖥️ Mở WebView2 đăng nhập tài khoản mới...");
+                    using (var form = new AccountsCenterForm())
+                        form.ShowDialog(this);
+                    LoadData();
+                    AppendLog("✅ Cập nhật danh sách tài khoản.");
+                }
+                else if (dlg.SelectedMethod == AddAccountDialog.LoginMethod.Phone)
+                {
+                    AppendLog("📱 Thêm tài khoản thủ công...");
+                    using (var form = new PhoneLoginDialog())
+                    {
+                        if (form.ShowDialog(this) == DialogResult.OK && form.SavedAccount != null)
+                        {
+                            LoadData();
+                            AppendLog($"✅ Đã thêm tài khoản: @{form.SavedAccount.Username}");
+                        }
+                    }
+                }
+            }
         }
 
         // ═══════════════════════════════════════════════════════════

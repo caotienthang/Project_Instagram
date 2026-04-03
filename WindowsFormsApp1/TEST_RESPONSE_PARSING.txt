@@ -1,0 +1,65 @@
+=== INSTAGRAM BLOKS API RESPONSE PARSING ===
+
+Response từ API: https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.bloks.caa.login.async.send_login_request/
+
+CÁC GIÁ TRỊ ĐƯỢC EXTRACT:
+
+1. **Authorization Header (IG-Set-Authorization)**:
+   Giá trị raw: Bearer IGT:2:eyJkc191c2VyX2lkIjoiMzc5NjQ3OTEwMDIiLCJzZXNzaW9uaWQiOiIzNzk2NDc5MTAwMiUzQUhnS1o3eDBTanFGaGtjJTNBMjglM0FBWWgyeUZKVjJ5VWR1VFpiT0FESHlJSUZhZlFNNnRjQUdaYkMtVmt6eVEifQ==
+   
+   Decode base64 phần sau "Bearer IGT:2:":
+   {"ds_user_id":"37964791002","sessionid":"37964791002%3AHgKZ7x0SjqFhkc%3A28%3AAYh2yFJV2yUduTZbOADHyIIFafQM6tcAGZbC-VkzyQ"}
+   
+   → Authorization (full): Bearer IGT:2:eyJkc191c2VyX2lkIjoiMzc5NjQ3OTEwMDIiLCJzZXNzaW9uaWQiOiIzNzk2NDc5MTAwMiUzQUhnS1o3eDBTanFGaGtjJTNBMjglM0FBWWgyeUZKVjJ5VWR1VFpiT0FESHlJSUZhZlFNNnRjQUdaYkMtVmt6eVEifQ==
+
+2. **SessionId (SessionIdPhone)**:
+   URL-encoded: 37964791002%3AHgKZ7x0SjqFhkc%3A28%3AAYh2yFJV2yUduTZbOADHyIIFafQM6tcAGZbC-VkzyQ
+   URL-decoded: 37964791002:HgKZ7x0SjqFhkc:28:AYh2yFJV2yUduTZbOADHyIIFafQM6tcAGZbC-VkzyQ
+   
+   → SessionIdPhone: 37964791002:HgKZ7x0SjqFhkc:28:AYh2yFJV2yUduTZbOADHyIIFafQM6tcAGZbC-VkzyQ
+
+3. **DsUserId (DsUserIdPhone)**:
+   Từ logged_in_user.pk: 37964791002
+   Từ JWT token: 37964791002
+   
+   → DsUserIdPhone: 37964791002
+
+4. **CsrfToken (CsrfTokenPhone)**:
+   Không có trong response này (Bloks API không trả về csrftoken)
+   Có thể lấy từ Set-Cookie headers hoặc để null
+   
+   → CsrfTokenPhone: null (hoặc lấy từ cookies nếu có)
+
+5. **Username**:
+   Từ logged_in_user.username: caotienthang4281
+
+6. **Full Name**:
+   Từ logged_in_user.full_name: Cao Tiến Thăng
+
+=== CODE IMPLEMENTATION ===
+
+Phương thức ParseLoginResponse đã được cập nhật để:
+
+1. Extract IG-Set-Authorization từ embedded payloads trong Bloks response
+2. Decode JWT token (base64) để lấy sessionid và ds_user_id
+3. URL decode sessionid để có format đúng
+4. Extract logged_in_user.pk làm fallback cho ds_user_id
+5. Lưu full Authorization header cho các API calls sau này
+
+=== SỬ DỤNG ===
+
+InstagramSessionRepository.UpsertPhone(
+    accountId: insertedAccountId,
+    sessionIdPhone: "37964791002:HgKZ7x0SjqFhkc:28:AYh2yFJV2yUduTZbOADHyIIFafQM6tcAGZbC-VkzyQ",
+    dsUserIdPhone: "37964791002",
+    csrfTokenPhone: null,  // Có thể null nếu không có
+    authorizationPhone: "Bearer IGT:2:eyJkc191c2VyX2lkIjoiMzc5NjQ3OTEwMDIiLCJzZXNzaW9uaWQiOiIzNzk2NDc5MTAwMiUzQUhnS1o3eDBTanFGaGtjJTNBMjglM0FBWWgyeUZKVjJ5VWR1VFpiT0FESHlJSUZhZlFNNnRjQUdaYkMtVmt6eVEifQ=="
+);
+
+=== LƯU Ý QUAN TRỌNG ===
+
+1. Authorization header này cần được gửi kèm trong mọi API requests sau khi login
+2. Format: "Authorization: Bearer IGT:2:..."
+3. SessionId format Instagram: {user_id}:{random}:{timestamp}:{hash}
+4. CSRF token có thể không cần thiết cho mobile API (Bloks)
+5. Response status = "ok" nghĩa là đăng nhập thành công

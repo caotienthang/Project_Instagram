@@ -13,11 +13,9 @@ namespace WindowsFormsApp1.Services
 {
     public class InstagramPostService
     {
-        // Forward proxy setting to central factory
-        public void SetProxy(string proxyUrl)
-        {
-            HttpClientFactory.SetProxy(proxyUrl);
-        }
+        // 🌐 PROXY: Proxy settings are now managed automatically by HttpClientFactory
+        // No need for manual SetProxy - it's loaded from Settings automatically
+
         // ===== PUBLIC API =====
         public async Task<string> PostMedia(List<string> paths, string caption, InstagramSession session)
         {

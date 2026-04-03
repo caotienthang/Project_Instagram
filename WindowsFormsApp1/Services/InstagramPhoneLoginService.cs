@@ -1,13 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.IO.Compression;
-using System.Linq;
-using System.Net.Http;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
-using System.Web;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Org.BouncyCastle.Crypto;
@@ -17,14 +7,115 @@ using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web;
+using System.Windows.Forms;
+using WindowsFormsApp1.Helpers;
+using WindowsFormsApp1.Managers;
+using WindowsFormsApp1.Models;
 
 namespace WindowsFormsApp1.Services
 {
     public class InstagramPhoneLoginService
     {
         private const string LOGIN_URL = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.bloks.caa.login.async.send_login_request/";
-        private const int ENCRYPTION_KEY_ID = 228;
-        private const string PUBLIC_KEY_BASE64 = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUFxYjhQbENSZjYzVHY2L0xvK3JaRQp3WjZ1dTdxS3JpQVFobHFlU2pVbnpLcVdYRmo5aVAyTVdzTUJwWkNUU0haUlo0VUkyd0taajF6UGkvUVhUaStOCkdIVVdGb2dKd0pZKzFCazF3MjF2cFFnQ3ZIMG55YWZBVUR1VFBUcVU0U3dWUVlCcEtydVlGQTNxUUhtdnZ4NVkKbTl1TXd4dXRrZjJ4OWxsZlZPeUpHMVJhbXJHeGtBYjdqTHdjeStQUm9MSHA1NTRhYTFQcDNYRmtlRkR6S3lORApvTi9WQVpGbVRSN0hSbDVIK01nQ1lDRktveXZxbkpIaFVhQ2txQWxITHRLckJ6VThqQm1zQTV6Lys3eGh4eis5CmljbnorVllBZndGREhBQVpmNGFIK2FEQTZKV0crZm9oQzduQ1BKQ3ZqdElsMnRFclJyQW5iVndLRGRiVDQ1cWwKWndJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==";
+
+        // 🎯 SETTINGS: Now loaded from appsettings.json instead of hardcoded
+        private static AppSettings Settings => SettingsManager.LoadSettings();
+
+        // 🚀 OPTIMIZATION: Cache RSA Public Key (parse once) - Now uses settings
+        private static readonly Lazy<AsymmetricKeyParameter> _cachedPublicKey = new Lazy<AsymmetricKeyParameter>(() =>
+        {
+            try
+            {
+                var publicKeyBase64 = Settings.InstagramApi.PublicKeyBase64;
+                byte[] keyBytes;
+
+                // Auto-detect format: PEM (old format) vs DER (new format)
+                try
+                {
+                    var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(publicKeyBase64));
+
+                    // Check if it's PEM format (contains "-----BEGIN PUBLIC KEY-----")
+                    if (decoded.Contains("-----BEGIN PUBLIC KEY-----"))
+                    {
+                        // OLD FORMAT: PEM wrapped, need to decode twice
+                        var publicKeyPem = decoded
+                            .Replace("-----BEGIN PUBLIC KEY-----", "")
+                            .Replace("-----END PUBLIC KEY-----", "")
+                            .Replace("\n", "")
+                            .Replace("\r", "");
+                        keyBytes = Convert.FromBase64String(publicKeyPem);
+                    }
+                    else
+                    {
+                        // NEW FORMAT: Pure DER base64, already decoded
+                        keyBytes = Convert.FromBase64String(publicKeyBase64);
+                    }
+                }
+                catch
+                {
+                    // If first decode fails, assume it's new format (pure DER base64)
+                    keyBytes = Convert.FromBase64String(publicKeyBase64);
+                }
+
+                return PublicKeyFactory.CreateKey(keyBytes);
+            }
+            catch (Exception ex)
+            {
+                // Fallback to hardcoded default if settings key is invalid
+                const string DEFAULT_PUBLIC_KEY_BASE64 = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqb8PlCRf63Tv6/Lo+rZEwZ6uu7qKriAQhlqeSjUnzKqWXFj9iP2MWsMBpZCTSHZRZ8UI2wKZj1zPi/QXTi+NGHUWFogJwJY+1Bk1w21vpQgCvH0nyafAUDuTPTqU4SwVQYBpKruYFA3qQHmvvx5Ym9uMwxutkf2x9llfVOyJG1RamrGxkAb7jLwcy+PRoLHp554aa1Pp3XFkeFDzKyNDoN/VAZFmTR7HRl5H+MgCYCFKoyvqnJHhUaCkqAlHLtKrBzU8jBmsA5z/+7xhxz+9icnz+VYAfwFDHAAZf4aH+aDA6JWG+fohC7nCPJCvjtIl2tErRrAnbVwKDdbT45qlZwIDAQAB";
+
+                Console.WriteLine($"⚠️ Lỗi khi load RSA Public Key từ settings: {ex.Message}");
+                Console.WriteLine("⚠️ Sử dụng default key thay thế. Vui lòng kiểm tra lại PublicKeyBase64 trong Settings.");
+
+                var keyBytes = Convert.FromBase64String(DEFAULT_PUBLIC_KEY_BASE64);
+                return PublicKeyFactory.CreateKey(keyBytes);
+            }
+        });
+
+        // 🚀 OPTIMIZATION: Compiled Regex patterns (cached)
+        private static readonly Regex _error2FARegex = new Regex(
+            @"\(dkc\s+""([^""]+)""\s+""two_factor_login""\s+""([^""]+)""",
+            RegexOptions.Compiled | RegexOptions.Singleline
+        );
+
+        private static readonly Regex _errorDialogRegex = new Regex(
+            @"fom 13799[^""]*40\s*""([^""]*)""\s*35\s*""([^""]*)""",
+            RegexOptions.Compiled
+        );
+
+        private static readonly Regex _loginResponseRegex = new Regex(
+            @"\\""login_response\\"":\\""(.*?)\\"",\\""headers\\""",
+            RegexOptions.Compiled
+        );
+
+        private static readonly Regex _headersRegex = new Regex(
+            @"\\""headers\\"":\\""(.*?)\\"",\\""cookies\\""",
+            RegexOptions.Compiled
+        );
+
+        private static readonly Regex _unicodeRegex = new Regex(
+            @"\\u([0-9A-Fa-f]{4})",
+            RegexOptions.Compiled
+        );
+
+        // 🌐 PROXY: Create new HttpClient each time to pick up latest settings
+        // Note: Trong production nên cache và recreate khi settings thay đổi
+        private static HttpClient GetHttpClient()
+        {
+            return HttpClientFactory.Create(useCookies: false);
+        }
 
         public class LoginResult
         {
@@ -34,33 +125,48 @@ namespace WindowsFormsApp1.Services
             public string DsUserId { get; set; }
             public string CsrfToken { get; set; }
             public string Authorization { get; set; }
+
+            // User info from login response
+            public string FbAccountId { get; set; }      // fbid_v2
+            public string PhoneAccountId { get; set; }   // pk_id
+            public string Username { get; set; }
+            public string FullName { get; set; }
+            public string Avatar { get; set; }
+            public string Phone { get; set; }
+
+            // 2FA support
+            public bool Requires2FA { get; set; }
+            public string TwoFactorContext { get; set; }  // two_step_verification_context
+            public string DeviceId { get; set; }          // android-xxxxx
         }
 
         public async Task<LoginResult> Login(string username, string password)
         {
             try
             {
-                var httpClient = HttpClientFactory.Create(useCookies: false);
+                // 🌐 PROXY: Get HttpClient với settings hiện tại (bao gồm proxy)
+                var httpClient = GetHttpClient();
 
-                // Generate device IDs (will be used in both body and headers)
-                var androidId = $"android-{Guid.NewGuid().ToString("N").Substring(0, 16)}";
+                // 🚀 OPTIMIZATION: Generate IDs efficiently
+                var guidString = Guid.NewGuid().ToString("N");
+                var androidId = string.Concat("android-", guidString.Substring(0, 16));
                 var familyDeviceId = Guid.NewGuid().ToString();
 
-                // Encrypt password
+                // Encrypt password (uses cached public key)
                 string encryptedPassword = EncryptPassword(password);
-                //string encryptedPassword = "#PWD_INSTAGRAM:4:1775035015:AeN+uierSrLTq7wLnNsAAZG2XEw9Nglc2PGcV4m97l0mzhrNg2TQ+g4k7fwpY/rfQ911xlTOGutqN/X3P1t5nWgnj9dQDen9tRVVPKV3U8ArUdJh3i7H5ihKfgzpYHObcZ8NqDpY7Kc0b8C8koIcIgrAOWmd+/HJwNmc4+N5+BM98nrQF9KfQbb18Jkik2rB2EH9n7rk/HhKOkmRFWKCNqYMpMxN+yg6vSz49ZKy055hfKhMaT/96Kr941nQpIhZhXKFgb7cyWNE7phuyW7RmaKNm2c53uObdMB5b1I4B8KsChMHOyyozDz6Ndx3hp28TUt6o1Z2Hq4lE7+H+tSeV2m/0scJswazwWRdV1uCoYK9fgXnirdjvVBHlmnh5I1tC0OXXuHg2Uxd";
-                // Build request body with device IDs
+
+                // Build request body
                 var bodyContent = BuildRequestBody(username, encryptedPassword, androidId, familyDeviceId);
 
                 // Set headers
                 SetRequestHeaders(httpClient);
 
-                // Send request
+                // Send request with ConfigureAwait(false) for better performance
                 var content = new StringContent(bodyContent, Encoding.UTF8, "application/x-www-form-urlencoded");
-                var response = await httpClient.PostAsync(LOGIN_URL, content);
+                var response = await httpClient.PostAsync(LOGIN_URL, content).ConfigureAwait(false);
 
-                // Read and decompress response (Instagram sends GZIP compressed data)
-                string responseBody = await ReadResponseAsync(response);
+                // Read and decompress response
+                string responseBody = await ReadResponseAsync(response).ConfigureAwait(false);
 
                 // Parse response
                 return ParseLoginResponse(response, responseBody);
@@ -79,41 +185,45 @@ namespace WindowsFormsApp1.Services
         {
             try
             {
-                // Get the raw response stream
-                using (var responseStream = await response.Content.ReadAsStreamAsync())
-                {
-                    // Check if response is GZIP compressed
-                    var contentEncoding = response.Content.Headers.ContentEncoding;
-                    bool isGzipped = contentEncoding.Contains("gzip");
+                // 🚀 OPTIMIZATION: Direct content read with buffer pooling
+                var contentEncoding = response.Content.Headers.ContentEncoding;
+                bool isGzipped = contentEncoding.Contains("gzip");
 
+                using (var responseStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                {
                     // If not explicitly marked as gzip, check magic bytes
                     if (!isGzipped)
                     {
-                        // Read first 2 bytes to check for GZIP magic number (1F 8B)
-                        var buffer = new byte[2];
-                        var bytesRead = await responseStream.ReadAsync(buffer, 0, 2);
-
-                        if (bytesRead == 2 && buffer[0] == 0x1F && buffer[1] == 0x8B)
+                        // Rent buffer from pool instead of allocating new array
+                        var buffer = ArrayPool<byte>.Shared.Rent(2);
+                        try
                         {
-                            isGzipped = true;
+                            var bytesRead = await responseStream.ReadAsync(buffer, 0, 2).ConfigureAwait(false);
+                            if (bytesRead == 2 && buffer[0] == 0x1F && buffer[1] == 0x8B)
+                            {
+                                isGzipped = true;
+                            }
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(buffer);
                         }
 
-                        // Reset stream position
+                        // Reset stream or re-read
                         if (responseStream.CanSeek)
                         {
                             responseStream.Seek(0, SeekOrigin.Begin);
                         }
                         else
                         {
-                            // If can't seek, we need to re-read the content
-                            using (var newStream = await response.Content.ReadAsStreamAsync())
+                            using (var newStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                             {
-                                return await DecompressAndReadAsync(newStream, isGzipped);
+                                return await DecompressAndReadAsync(newStream, isGzipped).ConfigureAwait(false);
                             }
                         }
                     }
 
-                    return await DecompressAndReadAsync(responseStream, isGzipped);
+                    return await DecompressAndReadAsync(responseStream, isGzipped).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -126,19 +236,18 @@ namespace WindowsFormsApp1.Services
         {
             if (isGzipped)
             {
-                // Decompress GZIP data
+                // 🚀 OPTIMIZATION: Use pooled buffer for decompression
                 using (var gzipStream = new GZipStream(responseStream, CompressionMode.Decompress, leaveOpen: true))
-                using (var reader = new StreamReader(gzipStream, Encoding.UTF8))
+                using (var reader = new StreamReader(gzipStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: false))
                 {
-                    return await reader.ReadToEndAsync();
+                    return await reader.ReadToEndAsync().ConfigureAwait(false);
                 }
             }
             else
             {
-                // Read as plain text
-                using (var reader = new StreamReader(responseStream, Encoding.UTF8))
+                using (var reader = new StreamReader(responseStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: false))
                 {
-                    return await reader.ReadToEndAsync();
+                    return await reader.ReadToEndAsync().ConfigureAwait(false);
                 }
             }
         }
@@ -147,66 +256,59 @@ namespace WindowsFormsApp1.Services
         {
             try
             {
-                // ===== 1. Parse public key =====
-                var publicKeyPem = Encoding.UTF8.GetString(Convert.FromBase64String(PUBLIC_KEY_BASE64))
-                    .Replace("-----BEGIN PUBLIC KEY-----", "")
-                    .Replace("-----END PUBLIC KEY-----", "")
-                    .Replace("\n", "")
-                    .Replace("\r", "");
+                // 🚀 OPTIMIZATION: Use cached public key instead of parsing every time
+                var rsaPublicKey = _cachedPublicKey.Value;
 
-                var keyBytes = Convert.FromBase64String(publicKeyPem);
-                var rsaPublicKey = DecodeX509PublicKey(keyBytes);
-
-                // ===== 2. Timestamp =====
+                // Timestamp
                 long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                // ===== 3. AES KEY + IV =====
+                // Generate AES KEY + IV
                 var random = new SecureRandom();
-
                 byte[] aesKey = new byte[32]; // AES-256
                 byte[] iv = new byte[12];     // GCM IV
-
                 random.NextBytes(aesKey);
                 random.NextBytes(iv);
 
-                // ===== 4. AAD =====
-                // AAD uses timestamp string!
+                // AAD uses timestamp string
                 byte[] aad = Encoding.UTF8.GetBytes(timestamp.ToString());
 
-                // ===== 5. PLAINTEXT =====
+                // Plaintext
                 byte[] plaintext = Encoding.UTF8.GetBytes(encrypt_password);
 
-                // ===== 6. AES-GCM =====
+                // AES-GCM Encryption
                 byte[] encrypted = AesGcmEncrypt(aesKey, iv, plaintext, aad);
 
-                // tách ra
-                byte[] ciphertext = encrypted.Take(encrypted.Length - 16).ToArray();
-                byte[] tag = encrypted.Skip(encrypted.Length - 16).ToArray();
+                // Split ciphertext and tag
+                int ciphertextLength = encrypted.Length - 16;
+                byte[] ciphertext = new byte[ciphertextLength];
+                byte[] tag = new byte[16];
+                Buffer.BlockCopy(encrypted, 0, ciphertext, 0, ciphertextLength);
+                Buffer.BlockCopy(encrypted, ciphertextLength, tag, 0, 16);
 
-                // ===== 7. RSA PKCS1_v1_5 =====
+                // RSA PKCS1_v1_5 encryption of AES key
                 byte[] encryptedKey = RsaPkcs1Encrypt(rsaPublicKey, aesKey);
 
-                // ===== 8. BUILD PAYLOAD =====
-                using (var ms = new MemoryStream())
+                // 🚀 OPTIMIZATION: Use MemoryStream with initial capacity
+                using (var ms = new MemoryStream(2 + iv.Length + 2 + encryptedKey.Length + tag.Length + ciphertext.Length))
                 using (var bw = new BinaryWriter(ms))
                 {
+                    // 🎯 SETTINGS: Use encryption key ID from settings
+                    var encryptionKeyId = Settings.InstagramApi.EncryptionKeyId;
+
                     bw.Write((byte)1); // version
-                    bw.Write((byte)ENCRYPTION_KEY_ID);
+                    bw.Write((byte)encryptionKeyId);
                     bw.Write(iv);
 
-                    // length of encryptedKey - MUST BE LITTLE-ENDIAN for Instagram App!
-                    ushort len = (ushort)encryptedKey.Length; // 256 for RSA-2048
-                    bw.Write((byte)(len & 0xFF)); // Low byte
-                    bw.Write((byte)(len >> 8));   // High byte
+                    // Length of encryptedKey - LITTLE-ENDIAN
+                    ushort len = (ushort)encryptedKey.Length;
+                    bw.Write((byte)(len & 0xFF));
+                    bw.Write((byte)(len >> 8));
 
                     bw.Write(encryptedKey);
-
-                    // Instagram puts TAG first, then ciphertext
                     bw.Write(tag);
                     bw.Write(ciphertext);
 
                     string base64 = Convert.ToBase64String(ms.ToArray());
-
                     return $"#PWD_INSTAGRAM:4:{timestamp}:{base64}";
                 }
             }
@@ -253,14 +355,13 @@ namespace WindowsFormsApp1.Services
 
         private string BuildRequestBody(string username, string encryptedPassword, string androidId, string familyDeviceId)
         {
-            // Simplified client_input_params (only 2 fields)
+            // 🚀 OPTIMIZATION: Use StringBuilder for better performance
             var clientInputParams = new
             {
                 password = encryptedPassword,
                 contact_point = username
             };
 
-            // Server params with required fields (matching sample)
             var serverParams = new
             {
                 is_platform_login = 0,
@@ -281,22 +382,29 @@ namespace WindowsFormsApp1.Services
                 server_params = serverParams
             };
 
-            var paramsJson = JsonConvert.SerializeObject(paramsObj);
+            // 🚀 OPTIMIZATION: Serialize once with optimized settings
+            var paramsJson = JsonConvert.SerializeObject(paramsObj, Formatting.None);
+            var encodedParams = HttpUtility.UrlEncode(paramsJson);
 
-            // Only params and bloks_versioning_id (no bk_client_context)
-            var body = $"params={HttpUtility.UrlEncode(paramsJson)}" +
-                      $"&bloks_versioning_id=899adff463607d5f13a547f7417a9de4a8b4add115ddebc553c1bc5b8d48a28a";
+            // 🎯 SETTINGS: Use bloks versioning ID from settings
+            var bloksVersioningId = Settings.InstagramApi.BloksVersioningId;
 
-            return body;
+            // Use StringBuilder for concatenation
+            return new StringBuilder(encodedParams.Length + bloksVersioningId.Length + 30)
+                .Append("params=")
+                .Append(encodedParams)
+                .Append("&bloks_versioning_id=")
+                .Append(bloksVersioningId)
+                .ToString();
         }
 
         private void SetRequestHeaders(HttpClient client)
         {
             client.DefaultRequestHeaders.Clear();
 
-            // Only 2 basic headers
-            client.DefaultRequestHeaders.Add("User-Agent", "Instagram 423.0.0.47.66 Android (28/9; 480dpi; 1080x1920; Redmi; 22127RK46C; marlin; qcom; en_US; 923309183)");
-            // Content-Type is set automatically by StringContent
+            // 🎯 SETTINGS: Use User-Agent from settings
+            var userAgent = Settings.InstagramApi.UserAgent;
+            client.DefaultRequestHeaders.Add("User-Agent", userAgent);
         }
 
         private LoginResult ParseLoginResponse(HttpResponseMessage response, string responseBody)
@@ -307,35 +415,48 @@ namespace WindowsFormsApp1.Services
                 string dsUserId = null;
                 string csrfToken = null;
                 string authorization = null;
+                string fbAccountId = null;
+                string phoneAccountId = null;
+                string username = null;
+                string fullName = null;
+                string avatar = null;
+                string phone = null;
 
-                // Extract cookies from Set-Cookie headers
+                // 🚀 OPTIMIZATION: Extract cookies efficiently
                 if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
                 {
                     foreach (var cookie in cookies)
                     {
-                        if (cookie.Contains("sessionid="))
+                        int startIdx, endIdx;
+
+                        if ((startIdx = cookie.IndexOf("sessionid=", StringComparison.Ordinal)) >= 0)
                         {
-                            var start = cookie.IndexOf("sessionid=") + "sessionid=".Length;
-                            var end = cookie.IndexOf(';', start);
-                            sessionId = end > start ? cookie.Substring(start, end - start) : cookie.Substring(start);
+                            startIdx += 10; // Length of "sessionid="
+                            endIdx = cookie.IndexOf(';', startIdx);
+                            sessionId = endIdx > startIdx ? cookie.Substring(startIdx, endIdx - startIdx) : cookie.Substring(startIdx);
                         }
-                        else if (cookie.Contains("ds_user_id="))
+                        else if ((startIdx = cookie.IndexOf("ds_user_id=", StringComparison.Ordinal)) >= 0)
                         {
-                            var start = cookie.IndexOf("ds_user_id=") + "ds_user_id=".Length;
-                            var end = cookie.IndexOf(';', start);
-                            dsUserId = end > start ? cookie.Substring(start, end - start) : cookie.Substring(start);
+                            startIdx += 11;
+                            endIdx = cookie.IndexOf(';', startIdx);
+                            dsUserId = endIdx > startIdx ? cookie.Substring(startIdx, endIdx - startIdx) : cookie.Substring(startIdx);
                         }
-                        else if (cookie.Contains("csrftoken="))
+                        else if ((startIdx = cookie.IndexOf("csrftoken=", StringComparison.Ordinal)) >= 0)
                         {
-                            var start = cookie.IndexOf("csrftoken=") + "csrftoken=".Length;
-                            var end = cookie.IndexOf(';', start);
-                            csrfToken = end > start ? cookie.Substring(start, end - start) : cookie.Substring(start);
+                            startIdx += 10;
+                            endIdx = cookie.IndexOf(';', startIdx);
+                            csrfToken = endIdx > startIdx ? cookie.Substring(startIdx, endIdx - startIdx) : cookie.Substring(startIdx);
                         }
                     }
                 }
 
-                // Parse Bloks response
-                var json = JObject.Parse(responseBody);
+                // 🚀 OPTIMIZATION: Parse JSON with optimized settings
+                JObject json;
+                using (var stringReader = new StringReader(responseBody))
+                using (var jsonReader = new JsonTextReader(stringReader) { MaxDepth = 128 })
+                {
+                    json = JObject.Load(jsonReader);
+                }
 
                 // Check status
                 var status = json["status"]?.ToString();
@@ -354,28 +475,35 @@ namespace WindowsFormsApp1.Services
                     // Check for error indicators in action
                     if (!string.IsNullOrEmpty(actionField))
                     {
+                        // 🚀 OPTIMIZATION: Use cached compiled regex
+                        if (actionField.Contains("[trait:error_2fa_bloks]"))
+                        {
+                            var blockMatch = _error2FARegex.Match(actionField);
+                            if (blockMatch.Success)
+                            {
+                                return new LoginResult
+                                {
+                                    Success = false,
+                                    Requires2FA = true,
+                                    Message = "⚠️ Tài khoản yêu cầu mã xác thực 2FA",
+                                    TwoFactorContext = blockMatch.Groups[1].Value,
+                                    DeviceId = blockMatch.Groups[2].Value,
+                                    CsrfToken = csrfToken
+                                };
+                            }
+                        }
+
                         // Check for "login_failed" event
                         if (actionField.Contains("login_failed") || actionField.Contains("login_wrong_password"))
                         {
-                            // Extract error message using regex for fom 13799 (error dialog)
-                            // Pattern: 40 "Title" 35 "Message"
-                            var errorMatch = System.Text.RegularExpressions.Regex.Match(
-                                actionField, 
-                                @"fom 13799[^""]*40\s*""([^""]*)""\s*35\s*""([^""]*)"""
-                            );
-
+                            var errorMatch = _errorDialogRegex.Match(actionField);
                             if (errorMatch.Success)
                             {
-                                var errorTitle = DecodeUnicode(errorMatch.Groups[1].Value);
                                 var errorMessage = DecodeUnicode(errorMatch.Groups[2].Value);
-                                return new LoginResult 
-                                { 
-                                    Success = false, 
-                                    Message = $"❌ {errorMessage}" 
-                                };
+                                return new LoginResult { Success = false, Message = $"❌ {errorMessage}" };
                             }
 
-                            // Fallback: check for common error messages
+                            // Fallback
                             if (actionField.Contains("kh\\u00f4ng ch\\u00ednh x\\u00e1c") || 
                                 actionField.Contains("incorrect") ||
                                 actionField.Contains("wrong_password"))
@@ -397,25 +525,15 @@ namespace WindowsFormsApp1.Services
                                 Message = "⚠️ Tài khoản cần xác minh. Vui lòng đăng nhập qua ứng dụng Instagram." 
                             };
                         }
-
-                        // Check for 2FA
-                        if (actionField.Contains("two_factor") || actionField.Contains("2fa"))
-                        {
-                            return new LoginResult 
-                            { 
-                                Success = false, 
-                                Message = "⚠️ Tài khoản có bật 2FA. Tính năng này đang được phát triển." 
-                            };
-                        }
                     }
 
                     // Extract login_response directly from action field if it contains it
-                    if (!string.IsNullOrEmpty(actionField) && actionField.Contains("login_response") && actionField.Contains("IG-Set-Authorization"))
+                    if (!string.IsNullOrEmpty(actionField) && actionField.Contains("login_response"))
                     {
                         try
                         {
-                            // Extract login_response JSON string (it's highly escaped)
-                            var loginResponseMatch = System.Text.RegularExpressions.Regex.Match(actionField, @"\\""login_response\\"":\\""(.*?)\\"",\\""headers\\""");
+                            // 🚀 OPTIMIZATION: Use cached regex
+                            var loginResponseMatch = _loginResponseRegex.Match(actionField);
                             if (loginResponseMatch.Success)
                             {
                                 var loginResponseJson = loginResponseMatch.Groups[1].Value
@@ -426,8 +544,17 @@ namespace WindowsFormsApp1.Services
                                 try
                                 {
                                     var loginData = JObject.Parse(loginResponseJson);
+                                    var loggedInUser = loginData["logged_in_user"];
+                                    if (loggedInUser != null)
+                                    {
+                                        fbAccountId = loggedInUser["fbid_v2"]?.ToString();
+                                        phoneAccountId = loggedInUser["pk_id"]?.ToString();
+                                        username = loggedInUser["username"]?.ToString();
+                                        fullName = loggedInUser["full_name"]?.ToString();
+                                        avatar = loggedInUser["profile_pic_url"]?.ToString();
+                                        phone = loggedInUser["phone_number"]?.ToString();
+                                    }
 
-                                    // Extract ds_user_id
                                     if (string.IsNullOrEmpty(dsUserId))
                                     {
                                         dsUserId = loginData["logged_in_user"]?["pk"]?.ToString() ??
@@ -437,8 +564,8 @@ namespace WindowsFormsApp1.Services
                                 catch { }
                             }
 
-                            // Extract headers JSON string
-                            var headersMatch = System.Text.RegularExpressions.Regex.Match(actionField, @"\\""headers\\"":\\""(.*?)\\"",\\""cookies\\""");
+                            // Extract headers JSON string (using cached regex)
+                            var headersMatch = _headersRegex.Match(actionField);
                             if (headersMatch.Success)
                             {
                                 var headersJson = headersMatch.Groups[1].Value
@@ -454,10 +581,10 @@ namespace WindowsFormsApp1.Services
                                     {
                                         authorization = authHeader;
 
-                                        // Decode base64 JWT to extract sessionid
+                                        // Decode base64 JWT
                                         if (authorization.StartsWith("Bearer IGT:2:"))
                                         {
-                                            var jwtPart = authorization.Substring("Bearer IGT:2:".Length);
+                                            var jwtPart = authorization.Substring(13); // Length of "Bearer IGT:2:"
                                             try
                                             {
                                                 var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(jwtPart));
@@ -468,7 +595,7 @@ namespace WindowsFormsApp1.Services
                                                     sessionId = jwtData["sessionid"]?.ToString();
                                                     if (!string.IsNullOrEmpty(sessionId))
                                                     {
-                                                        sessionId = System.Web.HttpUtility.UrlDecode(sessionId);
+                                                        sessionId = HttpUtility.UrlDecode(sessionId);
                                                     }
                                                 }
                                             }
@@ -501,6 +628,18 @@ namespace WindowsFormsApp1.Services
                                         .Replace("\\\\\\\\", "\\");
 
                                     var loginData = JObject.Parse(loginResponseJson);
+
+                                    // Extract user info
+                                    var loggedInUser = loginData["logged_in_user"];
+                                    if (loggedInUser != null)
+                                    {
+                                        fbAccountId = loggedInUser["fbid_v2"]?.ToString();
+                                        phoneAccountId = loggedInUser["pk_id"]?.ToString();
+                                        username = loggedInUser["username"]?.ToString();
+                                        fullName = loggedInUser["full_name"]?.ToString();
+                                        avatar = loggedInUser["profile_pic_url"]?.ToString();
+                                        phone = loggedInUser["phone_number"]?.ToString();
+                                    }
 
                                     // Extract ds_user_id from logged_in_user.pk
                                     if (string.IsNullOrEmpty(dsUserId))
@@ -553,6 +692,21 @@ namespace WindowsFormsApp1.Services
                 // Validate we have minimum required data
                 if (!string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(dsUserId))
                 {
+                    // Download avatar if available
+                    string avatarLocalPath = null;
+                    if (!string.IsNullOrEmpty(avatar))
+                    {
+                        string prefix = "https://instagram.fbmv1-1.fna.fbcdn.net/";
+                        avatar = avatar.Replace("\\/", "/");
+                        if (avatar.StartsWith(prefix))
+                        {
+                            avatar = avatar.Substring(prefix.Length);
+                        }
+                        avatar = avatar.Replace("//", "/");
+                        avatar = prefix + avatar;
+                        avatarLocalPath = DownloadAvatar(avatar, username);
+                    }
+
                     return new LoginResult
                     {
                         Success = true,
@@ -560,7 +714,13 @@ namespace WindowsFormsApp1.Services
                         SessionId = sessionId,
                         DsUserId = dsUserId,
                         CsrfToken = csrfToken,
-                        Authorization = authorization
+                        Authorization = authorization,
+                        FbAccountId = fbAccountId,
+                        PhoneAccountId = phoneAccountId,
+                        Username = username,
+                        FullName = fullName,
+                        Avatar = avatarLocalPath ?? avatar, // Use local path if download successful, otherwise use URL
+                        Phone = phone
                     };
                 }
 
@@ -581,15 +741,127 @@ namespace WindowsFormsApp1.Services
             }
         }
 
+        public async Task<LoginResult> Verify2FA(string code, string twoFactorContext, string deviceId, string csrfToken)
+        {
+            try
+            {
+                // 🚀 OPTIMIZATION: Reuse shared HttpClient
+                var paramsJson = new JObject
+                {
+                    ["client_input_params"] = new JObject
+                    {
+                        ["block_store_machine_id"] = "",
+                        ["code"] = code,
+                        ["device_id"] = deviceId
+                    },
+                    ["server_params"] = new JObject
+                    {
+                        ["INTERNAL__latency_qpl_marker_id"] = 36707139,
+                        ["challenge"] = "totp",
+                        ["INTERNAL__latency_qpl_instance_id"] = 74494577800297,
+                        ["two_step_verification_context"] = twoFactorContext,
+                        ["flow_source"] = "two_factor_login"
+                    }
+                };
+
+                // Build body content (optimized with StringBuilder)
+                var encodedParams = HttpUtility.UrlEncode(paramsJson.ToString(Formatting.None));
+
+                // 🎯 SETTINGS: Use bloks versioning ID from settings
+                var bloksVersioningId = Settings.InstagramApi.BloksVersioningId;
+
+                var bodyContent = new StringBuilder(encodedParams.Length + bloksVersioningId.Length + 30)
+                    .Append("params=")
+                    .Append(encodedParams)
+                    .Append("&bloks_versioning_id=")
+                    .Append(bloksVersioningId)
+                    .ToString();
+
+                // 🌐 PROXY: Get HttpClient với settings hiện tại
+                var httpClient = GetHttpClient();
+
+                // Set headers
+                SetRequestHeaders(httpClient);
+
+                // Send request with ConfigureAwait(false)
+                var content = new StringContent(bodyContent, Encoding.UTF8, "application/x-www-form-urlencoded");
+                var response = await httpClient.PostAsync(
+                    "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.verify_code.async/", 
+                    content
+                ).ConfigureAwait(false);
+
+                // Read and decompress response
+                string responseBody = await ReadResponseAsync(response).ConfigureAwait(false);
+
+                // Parse response
+                return ParseLoginResponse(response, responseBody);
+            }
+            catch (Exception ex)
+            {
+                return new LoginResult
+                {
+                    Success = false,
+                    Message = $"❌ Lỗi xác thực 2FA: {ex.Message}"
+                };
+            }
+        }
+
+        private string DownloadAvatar(string avatarUrl, string username)
+        {
+            // 🎯 SETTINGS: Check if avatar download is enabled
+            if (!Settings.Application.DownloadAvatars || string.IsNullOrEmpty(avatarUrl))
+                return null;
+
+            try
+            {
+                // 🎯 SETTINGS: Use avatar folder from settings
+                string avatarFolder = Path.Combine(Application.StartupPath, Settings.Application.AvatarCacheFolder);
+                if (!Directory.Exists(avatarFolder))
+                    Directory.CreateDirectory(avatarFolder);
+
+                // 🚀 OPTIMIZATION: Use simpler hash calculation
+                string fileHash;
+                using (var sha = SHA256.Create())
+                {
+                    var hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(avatarUrl));
+                    // Convert to hex more efficiently
+                    fileHash = BitConverter.ToString(hashBytes, 0, 4).Replace("-", "").ToLowerInvariant();
+                }
+
+                string fileName = $"{username ?? "avatar"}_{fileHash}.jpg";
+                string avatarLocalPath = Path.Combine(avatarFolder, fileName);
+
+                // Only download if file doesn't exist
+                if (!File.Exists(avatarLocalPath))
+                {
+                    // 🌐 PROXY: Use HttpClient with proxy settings
+                    using (var httpClient = GetHttpClient())
+                    {
+                        var bytes = httpClient.GetByteArrayAsync(avatarUrl).GetAwaiter().GetResult();
+                        File.WriteAllBytes(avatarLocalPath, bytes);
+                    }
+                }
+
+                return avatarLocalPath;
+            }
+            catch (Exception ex)
+            {
+                if (Settings.Application.EnableDebugLogging)
+                {
+                    Console.WriteLine($"Lỗi tải avatar: {ex.Message}");
+                }
+                return null;
+            }
+        }
+
         private string DecodeUnicode(string input)
         {
             if (string.IsNullOrEmpty(input))
                 return input;
 
-            // Decode Unicode escape sequences like \u1ea1 or \u00f4
-            return System.Text.RegularExpressions.Regex.Replace(
+            // 🚀 OPTIMIZATION: Use cached compiled regex
+            return _unicodeRegex.Replace(
                 input,
-                @"\\u([0-9A-Fa-f]{4})",
                 match => ((char)Convert.ToInt32(match.Groups[1].Value, 16)).ToString()
             );
         }

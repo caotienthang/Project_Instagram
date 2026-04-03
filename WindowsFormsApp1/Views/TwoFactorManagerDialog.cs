@@ -114,7 +114,7 @@ namespace WindowsFormsApp1.Views
             SetStatus($"⏳ Đang gỡ \"{seed.Name}\"…", Color.FromArgb(241, 196, 15));
             SetBusy(true);
 
-            var result = await _service.DisableTotpAsync(_account.AccountId, _session, seed.Id);
+            var result = await _service.DisableTotpAsync(_account.FbAccountId, _session, seed.Id);
 
             if (result.Success)
             {
@@ -161,7 +161,7 @@ namespace WindowsFormsApp1.Views
             SetStatus("⏳ Đang tạo key TOTP mới…", Color.FromArgb(241, 196, 15));
             SetBusy(true);
 
-            var key = await _service.GenerateTotpKeyAsync(_account.AccountId, _session, keyNickname);
+            var key = await _service.GenerateTotpKeyAsync(_account.FbAccountId, _session, keyNickname);
             if (!key.Success)
             {
                 SetStatus($"❌ {key.Message}", Color.FromArgb(231, 76, 60));
@@ -170,7 +170,7 @@ namespace WindowsFormsApp1.Views
             }
 
 
-            using (var dlg = new TwoFactorAddDeviceDialog(key, _service, _session, _account.AccountId))
+            using (var dlg = new TwoFactorAddDeviceDialog(key, _service, _session, _account.FbAccountId))
             {
                 dlg.ShowDialog(this);
 
@@ -251,7 +251,7 @@ namespace WindowsFormsApp1.Views
         private async Task RefreshStatusAsync()
         {
             SetStatus("⏳ Đang tải lại danh sách…", Color.FromArgb(241, 196, 15));
-            var newStatus = await _service.GetStatusAsync(_account.AccountId, _session);
+            var newStatus = await _service.GetStatusAsync(_account.FbAccountId, _session);
             if (string.IsNullOrEmpty(newStatus.Error))
             {
                 _status          = newStatus;

@@ -42,6 +42,8 @@ namespace WindowsFormsApp1.Helpers
             CREATE TABLE IF NOT EXISTS Accounts (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 AccountId TEXT,
+                FbAccountId TEXT,
+                PhoneAccountId TEXT,
                 FullName TEXT,
                 Username TEXT NOT NULL UNIQUE,
                 Email TEXT,
@@ -52,10 +54,34 @@ namespace WindowsFormsApp1.Helpers
             );";
             cmd.ExecuteNonQuery();
 
-            // Migration: add AccountId column to existing databases
+            // Migration: add AccountId column to existing databases (legacy)
             try
             {
                 cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN AccountId TEXT;";
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* column already exists — ignore */ }
+
+            // Migration: add FbAccountId column to existing databases
+            try
+            {
+                cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN FbAccountId TEXT;";
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* column already exists — ignore */ }
+
+            // Migration: add PhoneAccountId column to existing databases
+            try
+            {
+                cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN PhoneAccountId TEXT;";
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* column already exists — ignore */ }
+
+            // Migration: add Password column to existing databases
+            try
+            {
+                cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN Password TEXT;";
                 cmd.ExecuteNonQuery();
             }
             catch { /* column already exists — ignore */ }
@@ -81,9 +107,19 @@ namespace WindowsFormsApp1.Helpers
                 FbDtsg TEXT,
                 Lsd TEXT,
                 CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                SessionIdPhone TEXT,
+                DsUserIdPhone TEXT,
+                CsrfTokenPhone TEXT,
+                AuthorizationPhone TEXT,
                 FOREIGN KEY (AccountId) REFERENCES Accounts(Id) ON DELETE CASCADE
             );";
             cmd.ExecuteNonQuery();
+
+            // Migration: add phone session columns to existing databases
+            try { cmd.CommandText = "ALTER TABLE InstagramSessions ADD COLUMN SessionIdPhone TEXT;";    cmd.ExecuteNonQuery(); } catch { /* column already exists — ignore */ }
+            try { cmd.CommandText = "ALTER TABLE InstagramSessions ADD COLUMN DsUserIdPhone TEXT;";     cmd.ExecuteNonQuery(); } catch { /* column already exists — ignore */ }
+            try { cmd.CommandText = "ALTER TABLE InstagramSessions ADD COLUMN CsrfTokenPhone TEXT;";    cmd.ExecuteNonQuery(); } catch { /* column already exists — ignore */ }
+            try { cmd.CommandText = "ALTER TABLE InstagramSessions ADD COLUMN AuthorizationPhone TEXT;"; cmd.ExecuteNonQuery(); } catch { /* column already exists — ignore */ }
 
             connection.Close();
             Console.WriteLine("Tables created or already exist.");

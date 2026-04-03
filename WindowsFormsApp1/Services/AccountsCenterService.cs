@@ -25,11 +25,8 @@ namespace WindowsFormsApp1.Services
             _webView = webView;
         }
 
-        // Forward proxy setting to central factory
-        public void SetProxy(string proxyUrl)
-        {
-            HttpClientFactory.SetProxy(proxyUrl);
-        }
+        // 🌐 PROXY: Proxy settings are now managed automatically by HttpClientFactory
+        // No need for manual SetProxy - it's loaded from Settings automatically
 
         public async Task<(AccountInfo account, InstagramSession session)> GetAccountAndSession()
         {
@@ -116,11 +113,11 @@ namespace WindowsFormsApp1.Services
             }
             if (identity == null) throw new Exception("Parse lỗi");
 
-            // ── Account ID từ fx_accounts_management.accounts[0].id ──
-            string accountId = null;
+            // Extract fbAccountId from fx_accounts_management
+            string fbAccountId = null;
             var fxAccounts = data["data"]?["fx_accounts_management"]?["accounts"];
             if (fxAccounts != null && fxAccounts.Any())
-                accountId = fxAccounts[0]?["id"]?.ToString();
+                fbAccountId = fxAccounts[0]?["id"]?.ToString();
 
             var nodes = data["data"]?["fxcal_settings"]?["node"]?["personal_info_section"]?["nodes"];
 
@@ -190,7 +187,7 @@ namespace WindowsFormsApp1.Services
 
             return new AccountInfo
             {
-                AccountId = accountId,
+                FbAccountId = fbAccountId,
                 FullName  = identity["full_name"]?.ToString(),
                 Username  = identity["username"]?.ToString(),
                 Email     = string.Join(";", emails),
