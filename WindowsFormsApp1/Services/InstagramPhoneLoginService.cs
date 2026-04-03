@@ -409,6 +409,79 @@ namespace WindowsFormsApp1.Services
                         }
                     }
 
+                    // Extract login_response directly from action field if it contains it
+                    if (!string.IsNullOrEmpty(actionField) && actionField.Contains("login_response") && actionField.Contains("IG-Set-Authorization"))
+                    {
+                        try
+                        {
+                            // Extract login_response JSON string (it's highly escaped)
+                            var loginResponseMatch = System.Text.RegularExpressions.Regex.Match(actionField, @"\\""login_response\\"":\\""(.*?)\\"",\\""headers\\""");
+                            if (loginResponseMatch.Success)
+                            {
+                                var loginResponseJson = loginResponseMatch.Groups[1].Value
+                                    .Replace("\\\\\\\"", "\"")
+                                    .Replace("\\\\/", "/")
+                                    .Replace("\\\\\\\\", "\\");
+
+                                try
+                                {
+                                    var loginData = JObject.Parse(loginResponseJson);
+
+                                    // Extract ds_user_id
+                                    if (string.IsNullOrEmpty(dsUserId))
+                                    {
+                                        dsUserId = loginData["logged_in_user"]?["pk"]?.ToString() ??
+                                                  loginData["logged_in_user"]?["pk_id"]?.ToString();
+                                    }
+                                }
+                                catch { }
+                            }
+
+                            // Extract headers JSON string
+                            var headersMatch = System.Text.RegularExpressions.Regex.Match(actionField, @"\\""headers\\"":\\""(.*?)\\"",\\""cookies\\""");
+                            if (headersMatch.Success)
+                            {
+                                var headersJson = headersMatch.Groups[1].Value
+                                    .Replace("\\\\\\\"", "\"")
+                                    .Replace("\\\\\\\\", "\\");
+
+                                try
+                                {
+                                    var headersData = JObject.Parse(headersJson);
+                                    var authHeader = headersData["IG-Set-Authorization"]?.ToString();
+
+                                    if (!string.IsNullOrEmpty(authHeader))
+                                    {
+                                        authorization = authHeader;
+
+                                        // Decode base64 JWT to extract sessionid
+                                        if (authorization.StartsWith("Bearer IGT:2:"))
+                                        {
+                                            var jwtPart = authorization.Substring("Bearer IGT:2:".Length);
+                                            try
+                                            {
+                                                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(jwtPart));
+                                                var jwtData = JObject.Parse(decoded);
+
+                                                if (string.IsNullOrEmpty(sessionId))
+                                                {
+                                                    sessionId = jwtData["sessionid"]?.ToString();
+                                                    if (!string.IsNullOrEmpty(sessionId))
+                                                    {
+                                                        sessionId = System.Web.HttpUtility.UrlDecode(sessionId);
+                                                    }
+                                                }
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+                    }
+
                     // Search in embedded_payloads for login_response (success case)
                     var embeddedPayloads = layoutPayload["embedded_payloads"] as JArray;
                     if (embeddedPayloads != null)
