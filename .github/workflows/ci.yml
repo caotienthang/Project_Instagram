@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
+
+    - name: Restore NuGet packages (auto-detect solution)
+      shell: powershell
+      run: |
+        $sln = Get-ChildItem -Path . -Filter *.sln -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $sln) { Write-Host "No .sln found, skipping nuget restore"; exit 0 }
+        Write-Host "Restoring packages for $($sln.FullName)"
+        nuget restore "$($sln.FullName)"
+
+    - name: Build solution (Release)
+      shell: powershell
+      run: |
+        $sln = Get-ChildItem -Path . -Filter *.sln -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $sln) { Write-Host "No .sln found, skipping build"; exit 0 }
+        Write-Host "Building $($sln.FullName)"
+        msbuild "$($sln.FullName)" /p:Configuration=Release /m
+
+    - name: Run tests (if any)
+      shell: powershell
+      run: |
+        # Find test assemblies in bin\Release folders
+        $testDlls = Get-ChildItem -Path . -Recurse -Filter *Tests.dll -ErrorAction SilentlyContinue
+        if ($testDlls.Count -eq 0) { Write-Host "No test assemblies found, skipping tests"; exit 0 }
+        foreach ($dll in $testDlls) {
+            Write-Host "Running tests: $($dll.FullName)"
+            & "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe" "$($dll.FullName)"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Tests failed for $($dll.FullName) with exit code $LASTEXITCODE"
+                exit $LASTEXITCODE
+            }
+        }
+
+    - name: Upload build artifacts (optional)
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: |
+          **\bin\Release\**
