@@ -12,9 +12,43 @@ namespace WindowsFormsApp1.Views
     {
         public AccountInfo SavedAccount { get; private set; }
 
+        private readonly bool _isUpdateMode;
+        private readonly AccountInfo _existingAccount;
+
+        /// <summary>
+        /// Constructor cho Add Account mode (tạo mới)
+        /// </summary>
         public PhoneLoginDialog()
         {
             InitializeComponent();
+            _isUpdateMode = false;
+        }
+
+        /// <summary>
+        /// Constructor cho Get Cookie/Update Session mode (account đã tồn tại)
+        /// </summary>
+        /// <param name="existingAccount">Account cần update session</param>
+        public PhoneLoginDialog(AccountInfo existingAccount)
+        {
+            InitializeComponent();
+            _isUpdateMode = true;
+            _existingAccount = existingAccount;
+
+            // Pre-fill thông tin
+            if (existingAccount != null)
+            {
+                txtUsername.Text = existingAccount.Username;
+
+                // Pre-fill password nếu có
+                if (!string.IsNullOrWhiteSpace(existingAccount.Password))
+                {
+                    txtPassword.Text = existingAccount.Password;
+                }
+
+                // Change button text
+                btnConfirm.Text = "🔄 Update Session";
+                this.Text = $"Get Cookie - @{existingAccount.Username}";
+            }
         }
 
         private async void btnConfirm_Click(object sender, EventArgs e)
@@ -36,11 +70,15 @@ namespace WindowsFormsApp1.Views
                 return;
             }
 
-            var existing = AccountRepository.GetByUsername(username);
-            if (existing != null)
+            // Check account existence ONLY in Add mode
+            if (!_isUpdateMode)
             {
-                SetStatus("⚠️ Tài khoản đã tồn tại trong database.", Color.FromArgb(231, 76, 60));
-                return;
+                var existing = AccountRepository.GetByUsername(username);
+                if (existing != null)
+                {
+                    SetStatus("⚠️ Tài khoản đã tồn tại trong database.", Color.FromArgb(231, 76, 60));
+                    return;
+                }
             }
 
             // Disable controls during login
@@ -120,7 +158,8 @@ namespace WindowsFormsApp1.Views
                     PhoneAccountId = result.PhoneAccountId,
                     Username = result.Username ?? username,
                     FullName = result.FullName,
-                    Avatar = result.Avatar,
+                    LocalPathAvatar = result.Avatar,
+                    LinkAvatar = result.LinkAvatar,
                     Phone = result.Phone,
                     Status = "Active"
                 };
@@ -132,6 +171,7 @@ namespace WindowsFormsApp1.Views
                     result.Username ?? username,
                     result.FullName,
                     result.Avatar,
+                    result.LinkAvatar,
                     result.Phone,
                     result.SessionId,
                     result.DsUserId,
@@ -140,15 +180,29 @@ namespace WindowsFormsApp1.Views
                 );
 
                 // Get the saved account
-                SavedAccount = AccountRepository.GetByAccountIds(result.FbAccountId, result.PhoneAccountId);
-
-                if (SavedAccount != null)
+                if (_isUpdateMode && _existingAccount != null)
                 {
-                    // Save password
-                    AccountRepository.UpdatePassword(SavedAccount.Id, password);
-                }
+                    // Update mode: use existing account
+                    SavedAccount = _existingAccount;
 
-                SetStatus("✅ Đăng nhập thành công!", Color.FromArgb(46, 204, 113));
+                    // Update password if provided
+                    AccountRepository.UpdatePassword(_existingAccount.Id, password);
+
+                    SetStatus("✅ Session updated thành công!", Color.FromArgb(46, 204, 113));
+                }
+                else
+                {
+                    // Add mode: get newly created account
+                    SavedAccount = AccountRepository.GetByAccountIds(result.FbAccountId, result.PhoneAccountId);
+
+                    if (SavedAccount != null)
+                    {
+                        // Save password
+                        AccountRepository.UpdatePassword(SavedAccount.Id, password);
+                    }
+
+                    SetStatus("✅ Đăng nhập thành công!", Color.FromArgb(46, 204, 113));
+                }
 
                 // Wait a bit to show success message
                 await Task.Delay(1000);

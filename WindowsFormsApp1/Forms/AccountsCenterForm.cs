@@ -71,13 +71,13 @@ namespace WindowsFormsApp1.Forms
 
                     if (_account == null)
                     {
-                        // ADD
+                        // ADD - Insert new account
                         AccountRepository.Insert(acc);
                         dbAcc = AccountRepository.GetByUsername(acc.Username);
                     }
                     else
                     {
-                        // UPDATE
+                        // UPDATE - Use UpdateFromComputer to preserve phone data
                         if (acc.Username != _account.Username)
                         {
                             MessageBox.Show("Sai account login!");
@@ -85,12 +85,12 @@ namespace WindowsFormsApp1.Forms
                         }
 
                         acc.Id = _account.Id;
-                        AccountRepository.Update(acc);
+                        AccountRepository.UpdateFromComputer(acc);
                         dbAcc = acc;
                     }
 
                     session.AccountId = dbAcc.Id;
-                    InstagramSessionRepository.Upsert(session);
+                    InstagramSessionRepository.UpsertComputer(session);
                     this.Close();
                 }
             }

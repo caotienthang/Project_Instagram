@@ -9,7 +9,7 @@ namespace WindowsFormsApp1.Services
 {
     public class AvatarService
     {
-        public async Task<(bool success, string message, string localPath)> UploadAvatar(string filePath, InstagramSession session)
+        public async Task<(bool success, string message, string localPath, string remoteUrl)> UploadAvatar(string filePath, InstagramSession session)
         {
             try
             {
@@ -54,14 +54,14 @@ namespace WindowsFormsApp1.Services
                     // 👉 download lại avatar về local
                     string localPath = await DownloadAvatarToLocal(newAvatarUrl);
 
-                    return (true, "Đổi avatar thành công", localPath);
+                    return (true, "Đổi avatar thành công", localPath, newAvatarUrl);
                 }
 
-                return (false, json, null);
+                return (false, json, null, null);
             }
             catch (Exception ex)
             {
-                return (false, ex.Message, null);
+                return (false, ex.Message, null, null);
             }
         }
 

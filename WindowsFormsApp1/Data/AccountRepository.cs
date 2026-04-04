@@ -41,8 +41,8 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)";
+                INSERT INTO Accounts (FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, LinkAvatar, Birthday, Status)
+                VALUES (@FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @LinkAvatar, @Birthday, @Status)";
 
                 BindParams(cmd, acc, includeId: false);
 
@@ -67,11 +67,49 @@ namespace WindowsFormsApp1.Data
                     Email=@Email,
                     Phone=@Phone,
                     Avatar=@Avatar,
+                    LinkAvatar=@LinkAvatar,
                     Birthday=@Birthday,
                     Status=@Status
                 WHERE Id=@Id";
 
                 BindParams(cmd, acc, includeId: true);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        // ================= UPDATE FROM COMPUTER (WebView2) =================
+        // Only updates fields retrieved from computer flow, preserves phone-specific data
+        public static void UpdateFromComputer(AccountInfo acc)
+        {
+            using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
+            {
+                conn.Open();
+
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                UPDATE Accounts SET
+                    FbAccountId=COALESCE(NULLIF(@FbAccountId, ''), FbAccountId),
+                    Username=@Username,
+                    FullName=@FullName,
+                    Email=COALESCE(NULLIF(@Email, ''), Email),
+                    Phone=COALESCE(NULLIF(@Phone, ''), Phone),
+                    Avatar=COALESCE(NULLIF(@Avatar, ''), Avatar),
+                    LinkAvatar=COALESCE(NULLIF(@LinkAvatar, ''), LinkAvatar),
+                    Birthday=COALESCE(NULLIF(@Birthday, ''), Birthday),
+                    Status=@Status
+                WHERE Id=@Id";
+
+                cmd.Parameters.AddWithValue("@Id", acc.Id);
+                cmd.Parameters.AddWithValue("@FbAccountId", acc.FbAccountId ?? "");
+                cmd.Parameters.AddWithValue("@Username", acc.Username ?? "");
+                cmd.Parameters.AddWithValue("@FullName", acc.FullName ?? "");
+                cmd.Parameters.AddWithValue("@Email", acc.Email ?? "");
+                cmd.Parameters.AddWithValue("@Phone", acc.Phone ?? "");
+                cmd.Parameters.AddWithValue("@Avatar", acc.LocalPathAvatar ?? "");
+                cmd.Parameters.AddWithValue("@LinkAvatar", acc.LinkAvatar ?? "");
+                cmd.Parameters.AddWithValue("@Birthday", acc.Birthday ?? "");
+                cmd.Parameters.AddWithValue("@Status", acc.Status ?? "");
 
                 cmd.ExecuteNonQuery();
             }
@@ -86,8 +124,8 @@ namespace WindowsFormsApp1.Data
 
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                INSERT INTO Accounts (Id, FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, Birthday, Status)
-                VALUES (@Id, @FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @Birthday, @Status)
+                INSERT INTO Accounts (Id, FbAccountId, PhoneAccountId, Username, FullName, Email, Phone, Avatar, LinkAvatar, Birthday, Status)
+                VALUES (@Id, @FbAccountId, @PhoneAccountId, @Username, @FullName, @Email, @Phone, @Avatar, @LinkAvatar, @Birthday, @Status)
                 ON CONFLICT(Id) DO UPDATE SET
                     FbAccountId=excluded.FbAccountId,
                     PhoneAccountId=excluded.PhoneAccountId,
@@ -96,6 +134,7 @@ namespace WindowsFormsApp1.Data
                     Email=excluded.Email,
                     Phone=excluded.Phone,
                     Avatar=excluded.Avatar,
+                    LinkAvatar=excluded.LinkAvatar,
                     Birthday=excluded.Birthday,
                     Status=excluded.Status;
                 ";
@@ -154,17 +193,18 @@ namespace WindowsFormsApp1.Data
         }
 
         // ================= UPDATE AVATAR =================
-        public static void UpdateAvatar(int accountId, string avatarPath)
+        public static void UpdateAvatar(int accountId, string localPath, string linkAvatar = null)
         {
             using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
             {
                 conn.Open();
 
                 var cmd = conn.CreateCommand();
-                cmd.CommandText = "UPDATE Accounts SET Avatar=@Avatar WHERE Id=@Id";
+                cmd.CommandText = "UPDATE Accounts SET Avatar=@Avatar, LinkAvatar=@LinkAvatar WHERE Id=@Id";
 
                 cmd.Parameters.AddWithValue("@Id", accountId);
-                cmd.Parameters.AddWithValue("@Avatar", avatarPath ?? "");
+                cmd.Parameters.AddWithValue("@Avatar", localPath ?? "");
+                cmd.Parameters.AddWithValue("@LinkAvatar", linkAvatar ?? "");
 
                 cmd.ExecuteNonQuery();
             }
@@ -190,7 +230,7 @@ namespace WindowsFormsApp1.Data
         // ================= HELPER =================
         private static AccountInfo Map(SqliteDataReader reader)
         {
-            return new AccountInfo
+                return new AccountInfo
             {
                 Id             = Convert.ToInt32(reader["Id"]),
                 FbAccountId    = reader["FbAccountId"]?.ToString(),
@@ -199,7 +239,8 @@ namespace WindowsFormsApp1.Data
                 FullName       = reader["FullName"]?.ToString(),
                 Email          = reader["Email"]?.ToString(),
                 Phone          = reader["Phone"]?.ToString(),
-                Avatar         = reader["Avatar"]?.ToString(),
+                LocalPathAvatar = reader["Avatar"]?.ToString(),
+                LinkAvatar     = reader["LinkAvatar"]?.ToString(),
                 Birthday       = reader["Birthday"]?.ToString(),
                 Status         = reader["Status"]?.ToString(),
                 Password       = reader["Password"]?.ToString()
@@ -217,7 +258,9 @@ namespace WindowsFormsApp1.Data
             cmd.Parameters.AddWithValue("@FullName",       acc.FullName       ?? "");
             cmd.Parameters.AddWithValue("@Email",          acc.Email          ?? "");
             cmd.Parameters.AddWithValue("@Phone",          acc.Phone          ?? "");
-            cmd.Parameters.AddWithValue("@Avatar",         acc.Avatar         ?? "");
+            // Store local avatar path in Avatar column for backward compatibility
+            cmd.Parameters.AddWithValue("@Avatar",         acc.LocalPathAvatar ?? "");
+            cmd.Parameters.AddWithValue("@LinkAvatar",     acc.LinkAvatar ?? "");
             cmd.Parameters.AddWithValue("@Birthday",       acc.Birthday       ?? "");
             cmd.Parameters.AddWithValue("@Status",         acc.Status         ?? "");
         }

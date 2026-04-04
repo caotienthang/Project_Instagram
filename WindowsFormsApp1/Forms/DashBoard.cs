@@ -106,7 +106,7 @@ namespace WindowsFormsApp1.Forms
                 int rowIndex = grid.Rows.Add(
                     false, acc.Id,
                     acc.Username, acc.FullName, acc.Email, acc.Phone,
-                    LoadAvatar(acc.Avatar),
+                    LoadAvatar(acc.LocalPathAvatar),
                     acc.Birthday,
                     "Ready"
                 );
@@ -236,13 +236,41 @@ namespace WindowsFormsApp1.Forms
                 var account   = _accounts.FirstOrDefault(x => x.Id == accountId);
                 if (account == null) return;
 
-                AppendLog($"🍪 Getting cookie for: {account.Username}");
+                // Hỏi user chọn phương thức
+                var deviceType = DeviceSelectionDialog.ShowGetCookieDialog(account.Username, this);
 
-                using (var form = new AccountsCenterForm(account))
-                    form.ShowDialog();
+                if (deviceType == DeviceSelectionDialog.DeviceType.None)
+                    return; // User cancelled
 
-                LoadData();
-                AppendLog($"✅ Cookie updated: {account.Username}");
+                if (deviceType == DeviceSelectionDialog.DeviceType.Computer)
+                {
+                    // Computer: WebView2 (existing logic)
+                    AppendLog($"🍪 Getting cookie for: {account.Username} (WebView2)");
+
+                    using (var form = new AccountsCenterForm(account))
+                        form.ShowDialog();
+
+                    LoadData();
+                    AppendLog($"✅ Cookie updated: {account.Username}");
+                }
+                else if (deviceType == DeviceSelectionDialog.DeviceType.Phone)
+                {
+                    // Phone: Login via API
+                    AppendLog($"📱 Getting session for: {account.Username} (Phone API)");
+
+                    using (var form = new PhoneLoginDialog(account))
+                    {
+                        if (form.ShowDialog(this) == DialogResult.OK)
+                        {
+                            LoadData();
+                            AppendLog($"✅ Session updated: {account.Username}");
+                        }
+                        else
+                        {
+                            AppendLog($"❌ Login cancelled: {account.Username}");
+                        }
+                    }
+                }
             }
         }
 
@@ -296,7 +324,49 @@ namespace WindowsFormsApp1.Forms
 
                 try
                 {
-                    var status = await _twoFactorService.GetStatusAsync(account.FbAccountId, session);
+                    TwoFactorStatus status;
+
+                    // Determine which API to use based on available sessions
+                    bool hasPhoneSession = !string.IsNullOrWhiteSpace(session.AuthorizationPhone);
+                    bool hasComputerSession = !string.IsNullOrWhiteSpace(session.Cookie);
+
+                    // Always ask user to choose method (unless only one is available)
+                    DeviceSelectionDialog.DeviceType deviceType;
+
+                    if (hasPhoneSession && hasComputerSession)
+                    {
+                        // Both methods available - ask user
+                        deviceType = DeviceSelectionDialog.ShowGetCookieDialog(account.Username, this);
+                        if (deviceType == DeviceSelectionDialog.DeviceType.None)
+                            continue; // User cancelled
+                    }
+                    else if (hasPhoneSession)
+                    {
+                        deviceType = DeviceSelectionDialog.DeviceType.Phone;
+                        AppendLog($"[{account.Username}] 📱 Using Phone API (only available method)");
+                    }
+                    else if (hasComputerSession)
+                    {
+                        deviceType = DeviceSelectionDialog.DeviceType.Computer;
+                        AppendLog($"[{account.Username}] 💻 Using Computer API (only available method)");
+                    }
+                    else
+                    {
+                        AppendLog($"[{account.Username}] ❌ No valid session found");
+                        UpdateAccountStatus(account.Id, "No session", "error");
+                        continue;
+                    }
+
+                    // Call appropriate API based on selection
+                    if (deviceType == DeviceSelectionDialog.DeviceType.Phone)
+                    {
+                        var phoneSvc = new TwoFactorPhoneService();
+                        status = await phoneSvc.GetStatusByPhoneAsync(account.FbAccountId, session);
+                    }
+                    else
+                    {
+                        status = await _twoFactorService.GetStatusAsync(account.FbAccountId, session);
+                    }
 
                     if (!string.IsNullOrEmpty(status.Error))
                     {
@@ -400,8 +470,9 @@ namespace WindowsFormsApp1.Forms
                     var result = await _avatarService.UploadAvatar(img, session);
                     if (result.success)
                     {
-                        account.Avatar = result.localPath;
-                        AccountRepository.UpdateAvatar(account.Id, result.localPath);
+                        account.LocalPathAvatar = result.localPath;
+                        account.LinkAvatar = result.remoteUrl;
+                        AccountRepository.UpdateAvatar(account.Id, result.localPath, result.remoteUrl);
                         AppendLog($"[{account.Username}] ✅ Avatar changed");
                         UpdateAccountStatus(account.Id, "Avatar updated ✓", "success");
                     }
@@ -502,33 +573,31 @@ namespace WindowsFormsApp1.Forms
 
             var account = selected[0];
 
-            using (var methodDlg = new PasswordMethodDialog())
+            // Sử dụng dialog chung
+            var deviceType = DeviceSelectionDialog.ShowChangePasswordDialog(this);
+
+            if (deviceType == DeviceSelectionDialog.DeviceType.Computer)
             {
-                if (methodDlg.ShowDialog(this) != DialogResult.OK) return;
-
-                if (methodDlg.SelectedMethod == PasswordMethodDialog.ChangeMethod.Computer)
+                var session = InstagramSessionRepository.GetByAccountId(account.Id);
+                if (session == null)
                 {
-                    var session = InstagramSessionRepository.GetByAccountId(account.Id);
-                    if (session == null)
-                    {
-                        MessageBox.Show(
-                            $"Tài khoản @{account.Username} chưa có session.\nVui lòng dùng \"Get Cookie\" trước.",
-                            "Không có Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    AppendLog($"[{account.Username}] 🔑 Mở trang đổi mật khẩu qua WebView2...");
-                    using (var form = new ChangePasswordWebForm(account, session))
-                        form.ShowDialog(this);
-                    AppendLog($"[{account.Username}] ✅ Hoàn tất đổi mật khẩu (session đã xóa).");
+                    MessageBox.Show(
+                        $"Tài khoản @{account.Username} chưa có session.\nVui lòng dùng \"Get Cookie\" trước.",
+                        "Không có Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
-                else if (methodDlg.SelectedMethod == PasswordMethodDialog.ChangeMethod.Phone)
+
+                AppendLog($"[{account.Username}] 🔑 Mở trang đổi mật khẩu qua WebView2...");
+                using (var form = new ChangePasswordWebForm(account, session))
+                    form.ShowDialog(this);
+                AppendLog($"[{account.Username}] ✅ Hoàn tất đổi mật khẩu (session đã xóa).");
+            }
+            else if (deviceType == DeviceSelectionDialog.DeviceType.Phone)
+            {
+                using (var dlg = new ChangePasswordDialog(account))
                 {
-                    using (var dlg = new ChangePasswordDialog(account))
-                    {
-                        if (dlg.ShowDialog(this) == DialogResult.OK)
-                            AppendLog($"[{account.Username}] 🔑 Password updated successfully.");
-                    }
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                        AppendLog($"[{account.Username}] 🔑 Password updated successfully.");
                 }
             }
         }
@@ -538,28 +607,26 @@ namespace WindowsFormsApp1.Forms
         // ═══════════════════════════════════════════════════════════
         private void btnAddAccount_Click(object sender, EventArgs e)
         {
-            using (var dlg = new AddAccountDialog())
-            {
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            // Sử dụng dialog chung
+            var deviceType = DeviceSelectionDialog.ShowAddAccountDialog(this);
 
-                if (dlg.SelectedMethod == AddAccountDialog.LoginMethod.Computer)
+            if (deviceType == DeviceSelectionDialog.DeviceType.Computer)
+            {
+                AppendLog("🖥️ Mở WebView2 đăng nhập tài khoản mới...");
+                using (var form = new AccountsCenterForm())
+                    form.ShowDialog(this);
+                LoadData();
+                AppendLog("✅ Cập nhật danh sách tài khoản.");
+            }
+            else if (deviceType == DeviceSelectionDialog.DeviceType.Phone)
+            {
+                AppendLog("📱 Thêm tài khoản thủ công...");
+                using (var form = new PhoneLoginDialog())
                 {
-                    AppendLog("🖥️ Mở WebView2 đăng nhập tài khoản mới...");
-                    using (var form = new AccountsCenterForm())
-                        form.ShowDialog(this);
-                    LoadData();
-                    AppendLog("✅ Cập nhật danh sách tài khoản.");
-                }
-                else if (dlg.SelectedMethod == AddAccountDialog.LoginMethod.Phone)
-                {
-                    AppendLog("📱 Thêm tài khoản thủ công...");
-                    using (var form = new PhoneLoginDialog())
+                    if (form.ShowDialog(this) == DialogResult.OK && form.SavedAccount != null)
                     {
-                        if (form.ShowDialog(this) == DialogResult.OK && form.SavedAccount != null)
-                        {
-                            LoadData();
-                            AppendLog($"✅ Đã thêm tài khoản: @{form.SavedAccount.Username}");
-                        }
+                        LoadData();
+                        AppendLog($"✅ Đã thêm tài khoản: @{form.SavedAccount.Username}");
                     }
                 }
             }

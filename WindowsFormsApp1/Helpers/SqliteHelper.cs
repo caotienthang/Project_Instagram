@@ -49,6 +49,7 @@ namespace WindowsFormsApp1.Helpers
                 Email TEXT,
                 Phone TEXT,
                 Avatar TEXT,
+                LinkAvatar TEXT,
                 Birthday TEXT,
                 Status TEXT
             );";
@@ -82,6 +83,14 @@ namespace WindowsFormsApp1.Helpers
             try
             {
                 cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN Password TEXT;";
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* column already exists — ignore */ }
+
+            // Migration: add LinkAvatar column to existing databases
+            try
+            {
+                cmd.CommandText = "ALTER TABLE Accounts ADD COLUMN LinkAvatar TEXT;";
                 cmd.ExecuteNonQuery();
             }
             catch { /* column already exists — ignore */ }

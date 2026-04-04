@@ -193,7 +193,8 @@ namespace WindowsFormsApp1.Services
                 Email     = string.Join(";", emails),
                 Phone     = string.Join(";", phones),
                 Birthday  = birthday,
-                Avatar    = avatarLocalPath,
+                LocalPathAvatar = avatarLocalPath,
+                LinkAvatar = avatarUrl,
                 Status    = "Active"
             };
         }

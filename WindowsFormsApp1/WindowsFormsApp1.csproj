@@ -146,10 +146,18 @@
     <Compile Include="Forms\DashBoard.Designer.cs">
       <DependentUpon>DashBoard.cs</DependentUpon>
     </Compile>
+    <Compile Include="Forms\DeviceSelectionDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\DeviceSelectionDialog.Designer.cs">
+      <DependentUpon>DeviceSelectionDialog.cs</DependentUpon>
+    </Compile>
     <Compile Include="Forms\SettingsDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Forms\SettingsDialog.Designer.cs" />
+    <Compile Include="Forms\SettingsDialog.Designer.cs">
+      <DependentUpon>SettingsDialog.cs</DependentUpon>
+    </Compile>
     <Compile Include="Helpers\HttpClientFactory.cs" />
     <Compile Include="Helpers\SqliteHelper.cs" />
     <Compile Include="Managers\SettingsManager.cs" />
@@ -160,9 +168,11 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\AccountsCenterService.cs" />
     <Compile Include="Services\AvatarService.cs" />
+    <Compile Include="Services\ChangePasswordService.cs" />
     <Compile Include="Services\HttpClientFactory.cs" />
     <Compile Include="Services\InstagramPhoneLoginService.cs" />
     <Compile Include="Services\InstagramPostService.cs" />
+    <Compile Include="Services\TwoFactorPhoneService.cs" />
     <Compile Include="Services\TwoFactorService.cs" />
     <Compile Include="Views\AddAccountDialog.cs">
       <SubType>Form</SubType>
@@ -228,7 +238,11 @@
       <DependentUpon>TwoFactorAddDeviceDialog.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="appsettings.example.json" />
+    <None Include="CHANGE_PASSWORD_PHONE_API.md" />
     <None Include="config.json" />
+    <None Include="DEVICE_SELECTION_DIALOG.md" />
+    <None Include="DISABLE_2FA_COMPLETE.md" />
+    <None Include="GET_COOKIE_DEVICE_SELECTION.md" />
     <None Include="packages.config" />
     <None Include="PERFORMANCE_OPTIMIZATIONS.md" />
     <None Include="Properties\Settings.settings">
@@ -244,6 +258,7 @@
     <None Include="ReadMe.md" />
     <None Include="SETTINGS_GUIDE.md" />
     <None Include="SETTINGS_IMPLEMENTATION_SUMMARY.md" />
+    <None Include="TWOFACTOR_PHONE_API_COMPLETE.md" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

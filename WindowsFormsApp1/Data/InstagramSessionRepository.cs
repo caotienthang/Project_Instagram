@@ -37,10 +37,40 @@ namespace WindowsFormsApp1.Data
             }
         }
 
+        // ================= UPSERT COMPUTER SESSION (preserves phone data) =================
+        // Only updates Cookie, FbDtsg, Lsd from computer flow, keeps phone session intact
+        public static void UpsertComputer(InstagramSession s)
+        {
+            using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
+            {
+                conn.Open();
+
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                INSERT INTO InstagramSessions (AccountId, Cookie, FbDtsg, Lsd, CreatedAt,
+                    SessionIdPhone, DsUserIdPhone, CsrfTokenPhone, AuthorizationPhone)
+                VALUES (@AccountId, @Cookie, @FbDtsg, @Lsd, @CreatedAt, '', '', '', '')
+                ON CONFLICT(AccountId) DO UPDATE SET
+                    Cookie=excluded.Cookie,
+                    FbDtsg=excluded.FbDtsg,
+                    Lsd=excluded.Lsd,
+                    CreatedAt=excluded.CreatedAt;
+                ";
+
+                cmd.Parameters.AddWithValue("@AccountId", s.AccountId);
+                cmd.Parameters.AddWithValue("@Cookie", s.Cookie ?? "");
+                cmd.Parameters.AddWithValue("@FbDtsg", s.FbDtsg ?? "");
+                cmd.Parameters.AddWithValue("@Lsd", s.Lsd ?? "");
+                cmd.Parameters.AddWithValue("@CreatedAt", s.CreatedAt);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         // ================= UPSERT PHONE SESSION =================
         // Tìm hoặc tạo account dựa vào FbAccountId hoặc PhoneAccountId, sau đó upsert session
         public static void UpsertPhone(string fbAccountId, string phoneAccountId, 
-            string username, string fullName, string avatar, string phone,
+            string username, string fullName, string avatar, string linkAvatar, string phone,
             string sessionIdPhone, string dsUserIdPhone, string csrfTokenPhone, string authorizationPhone)
         {
             using (var conn = new SqliteConnection($"Data Source={SqliteHelper.DbPath}"))
@@ -73,6 +103,7 @@ namespace WindowsFormsApp1.Data
                             Username=@Username,
                             FullName=@FullName,
                             Avatar=@Avatar,
+                            LinkAvatar=@LinkAvatar,
                             Phone=@Phone
                         WHERE Id=@Id";
                     updateCmd.Parameters.AddWithValue("@Id", accountId);
@@ -81,6 +112,7 @@ namespace WindowsFormsApp1.Data
                     updateCmd.Parameters.AddWithValue("@Username", username ?? "");
                     updateCmd.Parameters.AddWithValue("@FullName", fullName ?? "");
                     updateCmd.Parameters.AddWithValue("@Avatar", avatar ?? "");
+                    updateCmd.Parameters.AddWithValue("@LinkAvatar", linkAvatar ?? "");
                     updateCmd.Parameters.AddWithValue("@Phone", phone ?? "");
                     updateCmd.ExecuteNonQuery();
                 }
@@ -89,14 +121,15 @@ namespace WindowsFormsApp1.Data
                     // Account chưa tồn tại - tạo mới
                     var insertCmd = conn.CreateCommand();
                     insertCmd.CommandText = @"
-                        INSERT INTO Accounts (FbAccountId, PhoneAccountId, Username, FullName, Avatar, Phone, Status)
-                        VALUES (@FbAccountId, @PhoneAccountId, @Username, @FullName, @Avatar, @Phone, 'active');
+                        INSERT INTO Accounts (FbAccountId, PhoneAccountId, Username, FullName, Avatar, LinkAvatar, Phone, Status)
+                        VALUES (@FbAccountId, @PhoneAccountId, @Username, @FullName, @Avatar, @LinkAvatar, @Phone, 'active');
                         SELECT last_insert_rowid();";
                     insertCmd.Parameters.AddWithValue("@FbAccountId", fbAccountId ?? "");
                     insertCmd.Parameters.AddWithValue("@PhoneAccountId", phoneAccountId ?? "");
                     insertCmd.Parameters.AddWithValue("@Username", username ?? "");
                     insertCmd.Parameters.AddWithValue("@FullName", fullName ?? "");
                     insertCmd.Parameters.AddWithValue("@Avatar", avatar ?? "");
+                    insertCmd.Parameters.AddWithValue("@LinkAvatar", linkAvatar ?? "");
                     insertCmd.Parameters.AddWithValue("@Phone", phone ?? "");
 
                     accountId = Convert.ToInt32(insertCmd.ExecuteScalar());

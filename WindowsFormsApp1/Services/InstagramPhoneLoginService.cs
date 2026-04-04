@@ -132,6 +132,7 @@ namespace WindowsFormsApp1.Services
             public string Username { get; set; }
             public string FullName { get; set; }
             public string Avatar { get; set; }
+            public string LinkAvatar { get; set; }
             public string Phone { get; set; }
 
             // 2FA support
@@ -719,7 +720,8 @@ namespace WindowsFormsApp1.Services
                         PhoneAccountId = phoneAccountId,
                         Username = username,
                         FullName = fullName,
-                        Avatar = avatarLocalPath ?? avatar, // Use local path if download successful, otherwise use URL
+                        Avatar = avatarLocalPath,
+                        LinkAvatar = avatar,
                         Phone = phone
                     };
                 }

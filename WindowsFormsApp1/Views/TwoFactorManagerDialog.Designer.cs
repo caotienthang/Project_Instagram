@@ -18,6 +18,7 @@ namespace WindowsFormsApp1.Views
             this.lblTitle    = new System.Windows.Forms.Label();
             this.pnlFooter   = new System.Windows.Forms.Panel();
             this.btnAdd      = new System.Windows.Forms.Button();
+            this.btnDisable  = new System.Windows.Forms.Button();
             this.btnClose    = new System.Windows.Forms.Button();
             this.pnlContent  = new System.Windows.Forms.Panel();
             this.lblSubtitle = new System.Windows.Forms.Label();
@@ -47,6 +48,7 @@ namespace WindowsFormsApp1.Views
             this.pnlFooter.Dock      = System.Windows.Forms.DockStyle.Bottom;
             this.pnlFooter.Height    = 58;
             this.pnlFooter.Controls.Add(this.btnAdd);
+            this.pnlFooter.Controls.Add(this.btnDisable);
             this.pnlFooter.Controls.Add(this.btnClose);
 
             this.btnAdd.Text      = "➕  Thêm thiết bị";
@@ -61,6 +63,18 @@ namespace WindowsFormsApp1.Views
             this.btnAdd.Size     = new System.Drawing.Size(155, 34);
             this.btnAdd.Click   += new System.EventHandler(this.btnAdd_Click);
 
+            this.btnDisable.Text      = "🔴  Tắt 2FA";
+            this.btnDisable.BackColor = System.Drawing.Color.FromArgb(192, 57, 43);
+            this.btnDisable.ForeColor = System.Drawing.Color.White;
+            this.btnDisable.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnDisable.FlatAppearance.BorderSize         = 0;
+            this.btnDisable.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(231, 76, 60);
+            this.btnDisable.Font     = new System.Drawing.Font("Segoe UI", 9.5F, System.Drawing.FontStyle.Bold);
+            this.btnDisable.Cursor   = System.Windows.Forms.Cursors.Hand;
+            this.btnDisable.Location = new System.Drawing.Point(180, 12);
+            this.btnDisable.Size     = new System.Drawing.Size(120, 34);
+            this.btnDisable.Click   += new System.EventHandler(this.btnDisable_Click);
+
             this.btnClose.Text      = "Đóng";
             this.btnClose.BackColor = System.Drawing.Color.FromArgb(52, 58, 90);
             this.btnClose.ForeColor = System.Drawing.Color.White;
@@ -69,7 +83,7 @@ namespace WindowsFormsApp1.Views
             this.btnClose.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(68, 75, 115);
             this.btnClose.Font     = new System.Drawing.Font("Segoe UI", 9.5F, System.Drawing.FontStyle.Bold);
             this.btnClose.Cursor   = System.Windows.Forms.Cursors.Hand;
-            this.btnClose.Location = new System.Drawing.Point(180, 12);
+            this.btnClose.Location = new System.Drawing.Point(312, 12);
             this.btnClose.Size     = new System.Drawing.Size(90, 34);
             this.btnClose.Click   += new System.EventHandler(this.btnClose_Click);
 
@@ -133,6 +147,7 @@ namespace WindowsFormsApp1.Views
         private System.Windows.Forms.Label           lblTitle;
         private System.Windows.Forms.Panel           pnlFooter;
         private System.Windows.Forms.Button          btnAdd;
+        private System.Windows.Forms.Button          btnDisable;
         private System.Windows.Forms.Button          btnClose;
         private System.Windows.Forms.Panel           pnlContent;
         private System.Windows.Forms.Label           lblSubtitle;

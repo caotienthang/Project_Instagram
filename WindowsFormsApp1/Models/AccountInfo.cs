@@ -16,7 +16,10 @@ namespace WindowsFormsApp1.Models
         public string Username { get; set; }
         public string Email { get; set; }
         public string Phone { get; set; }
-        public string Avatar { get; set; }
+        // Local cached avatar path (downloaded image on disk)
+        public string LocalPathAvatar { get; set; }
+        // Remote avatar URL returned by Instagram API
+        public string LinkAvatar { get; set; }
         public string Birthday { get; set; }
         public string Status { get; set; }
         public string Password { get; set; }

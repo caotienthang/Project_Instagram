@@ -5,15 +5,18 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using WindowsFormsApp1.Models;
 using WindowsFormsApp1.Services;
+using WindowsFormsApp1.Forms;
 
 namespace WindowsFormsApp1.Views
 {
     public partial class TwoFactorManagerDialog : Form
     {
         private readonly TwoFactorService _service;
+        private readonly TwoFactorPhoneService _phoneService;
         private readonly AccountInfo      _account;
         private readonly InstagramSession _session;
         private TwoFactorStatus           _status;
+        private readonly bool             _usePhoneApi;
 
         // Row width inside the FlowLayoutPanel (460 - padding 14*2 - scrollbar ~17)
         private const int RowWidth  = 408;
@@ -33,9 +36,18 @@ namespace WindowsFormsApp1.Views
             _service = service;
             _session = session;
 
+            // Determine if we should use phone API based on session
+            _usePhoneApi = !string.IsNullOrWhiteSpace(session.AuthorizationPhone);
+            if (_usePhoneApi)
+            {
+                _phoneService = new TwoFactorPhoneService();
+            }
+
             FinalTotpEnabled   = status.IsTotpEnabled;
             lblTitle.Text      = $"🔐  Quản lý 2FA — @{account.Username}";
             btnAdd.Enabled     = status.CanAddAdditional;
+            btnDisable.Enabled = status.IsTotpEnabled; // Only enable if 2FA is ON
+            btnDisable.Visible = _usePhoneApi; // Only show for phone API (computer doesn't support disable)
 
             RenderDevices();
         }
@@ -114,7 +126,17 @@ namespace WindowsFormsApp1.Views
             SetStatus($"⏳ Đang gỡ \"{seed.Name}\"…", Color.FromArgb(241, 196, 15));
             SetBusy(true);
 
-            var result = await _service.DisableTotpAsync(_account.FbAccountId, _session, seed.Id);
+            TwoFactorActionResult result;
+
+            // Use consistent API based on how status was checked
+            if (_usePhoneApi)
+            {
+                result = await _phoneService.RemoveTotpByPhoneAsync(_account.FbAccountId, seed.Id, _session);
+            }
+            else
+            {
+                result = await _service.DisableTotpAsync(_account.FbAccountId, _session, seed.Id);
+            }
 
             if (result.Success)
             {
@@ -158,29 +180,67 @@ namespace WindowsFormsApp1.Views
                 }
             }
 
-            SetStatus("⏳ Đang tạo key TOTP mới…", Color.FromArgb(241, 196, 15));
-            SetBusy(true);
-
-            var key = await _service.GenerateTotpKeyAsync(_account.FbAccountId, _session, keyNickname);
-            if (!key.Success)
+            // Use consistent API based on how status was checked
+            if (_usePhoneApi)
             {
-                SetStatus($"❌ {key.Message}", Color.FromArgb(231, 76, 60));
-                SetBusy(false);
-                return;
-            }
+                // Phone API flow
+                SetStatus("⏳ Đang tạo key TOTP mới…", Color.FromArgb(241, 196, 15));
+                SetBusy(true);
 
+                var phoneResult = await _phoneService.AddTotpByPhoneAsync(_account.FbAccountId, _session, keyNickname);
 
-            using (var dlg = new TwoFactorAddDeviceDialog(key, _service, _session, _account.FbAccountId))
-            {
-                dlg.ShowDialog(this);
-
-                if (dlg.DeviceAdded)
+                if (!phoneResult.Success)
                 {
-                    OnLog?.Invoke($"[{_account.Username}] ✅ Thêm thiết bị 2FA thành công");
-                    NeedsRefresh     = true;
-                    FinalTotpEnabled = true;
-                    await RefreshStatusAsync();
+                    OnLog?.Invoke($"[{_account.Username}] ❌ Thêm 2FA (Phone) thất bại: {phoneResult.Message}");
+                    SetStatus($"❌ {phoneResult.Message}", Color.FromArgb(231, 76, 60));
+                    SetBusy(false);
+                    return;
                 }
+
+                using (var dlg = new TwoFactorAddDeviceDialog(phoneResult, _service, _session, _account.FbAccountId,
+                    async (code) => await _phoneService.ConfirmTotpByPhoneAsync(_account.FbAccountId, code, _session, phoneResult)))
+                {
+                    dlg.ShowDialog(this);
+
+                    if (dlg.DeviceAdded)
+                    {
+                        OnLog?.Invoke($"[{_account.Username}] ✅ Thêm thiết bị 2FA (Phone) thành công");
+                        NeedsRefresh     = true;
+                        FinalTotpEnabled = true;
+                        await RefreshStatusAsync();
+                    }
+                }
+
+                SetBusy(false);
+            }
+            else
+            {
+                // Computer API flow
+                SetStatus("⏳ Đang tạo key TOTP mới…", Color.FromArgb(241, 196, 15));
+                SetBusy(true);
+
+                var key = await _service.GenerateTotpKeyAsync(_account.FbAccountId, _session, keyNickname);
+                if (!key.Success)
+                {
+                    SetStatus($"❌ {key.Message}", Color.FromArgb(231, 76, 60));
+                    SetBusy(false);
+                    return;
+                }
+
+                using (var dlg = new TwoFactorAddDeviceDialog(key, _service, _session, _account.FbAccountId))
+                {
+                    dlg.ShowDialog(this);
+
+                    if (dlg.DeviceAdded)
+                    {
+                        OnLog?.Invoke($"[{_account.Username}] ✅ Thêm thiết bị 2FA thành công");
+                        NeedsRefresh     = true;
+                        FinalTotpEnabled = true;
+                        await RefreshStatusAsync();
+                    }
+                }
+
+                SetBusy(false);
             }
         }
 
@@ -251,7 +311,19 @@ namespace WindowsFormsApp1.Views
         private async Task RefreshStatusAsync()
         {
             SetStatus("⏳ Đang tải lại danh sách…", Color.FromArgb(241, 196, 15));
-            var newStatus = await _service.GetStatusAsync(_account.FbAccountId, _session);
+
+            TwoFactorStatus newStatus;
+
+            // Use consistent API based on how status was checked
+            if (_usePhoneApi)
+            {
+                newStatus = await _phoneService.GetStatusByPhoneAsync(_account.FbAccountId, _session);
+            }
+            else
+            {
+                newStatus = await _service.GetStatusAsync(_account.FbAccountId, _session);
+            }
+
             if (string.IsNullOrEmpty(newStatus.Error))
             {
                 _status          = newStatus;
@@ -269,6 +341,71 @@ namespace WindowsFormsApp1.Views
         // ── Helpers ──────────────────────────────────────────────────
         private void btnClose_Click(object sender, EventArgs e) => Close();
 
+        private async void btnDisable_Click(object sender, EventArgs e)
+        {
+            // Confirm with user
+            var confirmResult = MessageBox.Show(
+                $"Bạn có chắc chắn muốn TẮT hoàn toàn 2FA cho tài khoản @{_account.Username}?\n\n" +
+                "⚠️ Thao tác này sẽ:\n" +
+                "• Xóa TẤT CẢ thiết bị TOTP đã đăng ký\n" +
+                "• Tắt bảo mật 2 lớp hoàn toàn\n" +
+                "• Không thể hoàn tác!",
+                "⚠️ Xác nhận Tắt 2FA",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2
+            );
+
+            if (confirmResult != DialogResult.Yes)
+                return;
+
+            SetStatus("⏳ Đang tắt 2FA…", Color.FromArgb(241, 196, 15));
+            SetBusy(true);
+
+            // Only phone API supports disable
+            if (_usePhoneApi && _phoneService != null)
+            {
+                var result = await _phoneService.DisableTotpByPhoneAsync(_account.FbAccountId, _session);
+
+                if (result.Success)
+                {
+                    _status.IsTotpEnabled = false;
+                    _status.Seeds.Clear();
+                    _status.CanAddAdditional = true;
+                    _status.CanDisable = false;
+
+                    FinalTotpEnabled = false;
+                    NeedsRefresh = true;
+
+                    OnLog?.Invoke($"[{_account.Username}] ✅ Đã TẮT 2FA thành công");
+                    SetStatus("✅ 2FA đã được TẮT", Color.FromArgb(46, 204, 113));
+
+                    btnAdd.Enabled = true;
+                    btnDisable.Enabled = false;
+                    RenderDevices();
+
+                    MessageBox.Show(
+                        "✅ 2FA đã được tắt thành công!\n\n" +
+                        "Tài khoản của bạn không còn được bảo vệ bởi xác thực 2 lớp.",
+                        "Thành công",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+                else
+                {
+                    OnLog?.Invoke($"[{_account.Username}] ❌ Tắt 2FA thất bại: {result.Message}");
+                    SetStatus($"❌ {result.Message}", Color.FromArgb(231, 76, 60));
+                }
+            }
+            else
+            {
+                SetStatus("❌ Chức năng chỉ hỗ trợ Phone API", Color.FromArgb(231, 76, 60));
+            }
+
+            SetBusy(false);
+        }
+
         private void SetStatus(string msg, Color color)
         {
             lblStatus.Text      = msg;
@@ -278,8 +415,9 @@ namespace WindowsFormsApp1.Views
 
         private void SetBusy(bool busy)
         {
-            btnAdd.Enabled   = !busy && (_status?.CanAddAdditional ?? false);
-            btnClose.Enabled = !busy;
+            btnAdd.Enabled     = !busy && (_status?.CanAddAdditional ?? false);
+            btnDisable.Enabled = !busy && (_status?.IsTotpEnabled ?? false) && _usePhoneApi;
+            btnClose.Enabled   = !busy;
 
             bool canRemove = !busy && (_status?.Seeds.Count >= 2);
             foreach (Control row in pnlDevices.Controls)

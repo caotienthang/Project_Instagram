@@ -39,6 +39,11 @@ namespace WindowsFormsApp1.Services
         public string KeyText   { get; set; }
         public string QrCodeUri { get; set; }
         public string Message   { get; set; }
+
+        // Device IDs used for phone flow (needed for confirm call)
+        public string FamilyDeviceId { get; set; }
+        public string DeviceId       { get; set; }
+        public string MachineId      { get; set; }
     }
 
     public class TwoFactorService

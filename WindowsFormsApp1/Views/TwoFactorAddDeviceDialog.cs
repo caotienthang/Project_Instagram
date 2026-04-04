@@ -16,13 +16,15 @@ namespace WindowsFormsApp1.Views
         private readonly string           _accountId;
         private readonly string           _qrCodeUri;
         private readonly string           _keyText;
+        private readonly Func<string, Task<TwoFactorActionResult>> _confirmCallback;
 
         public bool DeviceAdded { get; private set; }
 
         public TwoFactorAddDeviceDialog(TotpKeyResult key,
                                         TwoFactorService service,
                                         InstagramSession session,
-                                        string accountId)
+                                        string accountId,
+                                        Func<string, Task<TwoFactorActionResult>> confirmCallback = null)
         {
             InitializeComponent();
             _service   = service;
@@ -30,6 +32,7 @@ namespace WindowsFormsApp1.Views
             _accountId = accountId;
             _qrCodeUri = key.QrCodeUri;
             _keyText   = key.KeyText;
+            _confirmCallback = confirmCallback ?? (async code => await _service.ConfirmTotpAsync(_accountId, code, _session));
 
             lblKeyText.Text = key.KeyText ?? "";
 
@@ -70,7 +73,7 @@ namespace WindowsFormsApp1.Views
             SetStatus("⏳ Đang xác nhận…", Color.FromArgb(241, 196, 15));
             SetBusy(true);
 
-            var result = await _service.ConfirmTotpAsync(_accountId, code, _session);
+            var result = await _confirmCallback(code);
 
             if (result.Success)
             {
